@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { ArrowLeft, Zap, Trophy, Wifi, Copy, Check } from 'lucide-react';
 import { useTournaments, useSettings, useToast, useBladers, useArenas } from '../store';
-import { t, Match, Blader, FINISH_POINTS, FINISH_LABELS, FINISH_COLORS, FinishType, BattleMode, BATTLE_MODE_LABELS, BATTLE_MODE_DESC } from '../types';
+import { t, Match, Blader, FINISH_POINTS, FINISH_LABELS, FINISH_COLORS, FinishType, BattleMode, BATTLE_MODE_LABELS, BATTLE_MODE_DESC, BattleRound } from '../types';
+import { getBackendMode, getRemoteUrl } from '../services/api';
 import { BEYS } from '../data/beys';
 import { ARENAS } from '../data/arenas';
 import Modal from '../components/common/Modal';
@@ -26,14 +27,9 @@ export default function TournamentDetail() {
   const [battleModal, setBattleModal] = useState<Match | null>(null);
   
   // Interactive Match Play State
-  const [matchRounds, setMatchRounds] = useState<{
-    winnerId: string;
-    finishType: FinishType;
-    b1Pts: number;
-    b2Pts: number;
-    bey1?: string;
-    bey2?: string;
-  }[]>([]);
+  const [matchRounds, setMatchRounds] = useState<BattleRound[]>([]);
+  const [roundType, setRoundType] = useState<'finish' | 'draw' | 'foul'>('finish');
+  const [foulBladerId, setFoulBladerId] = useState('');
   const [matchPhase, setMatchPhase] = useState<'setup' | 'animation' | 'round_result' | 'match_progress'>('setup');
   const [currentRoundForm, setCurrentRoundForm] = useState({
     winner_id: '',
@@ -92,8 +88,10 @@ export default function TournamentDetail() {
 
   const standings = [...bladers].sort((a, b) => b.wins - a.wins || b.points_total - a.points_total);
 
-  const joinUrl = `http://${localIp}:7878/join/${tournament.join_code}`;
-  const serverUrl = `http://${localIp}:7878`;
+  const backendMode = getBackendMode();
+  const remoteUrl = getRemoteUrl();
+  const joinUrl = backendMode === 'remote' ? `${remoteUrl.replace(/\/$/, '')}/join/${tournament.join_code}` : `http://${localIp}:7878/join/${tournament.join_code}`;
+  const serverUrl = backendMode === 'remote' ? remoteUrl : `http://${localIp}:7878`;
 
   const b1Id = battleModal?.blader1_id || '';
   const b2Id = battleModal?.blader2_id || '';
@@ -101,11 +99,13 @@ export default function TournamentDetail() {
   const b2 = bladerMap[b2Id];
 
   // Cumulative scores
-  const score1 = matchRounds.reduce((acc, r) => acc + r.b1Pts, 0);
-  const score2 = matchRounds.reduce((acc, r) => acc + r.b2Pts, 0);
+  const score1 = matchRounds.reduce((acc, r) => acc + r.b1_points, 0);
+  const score2 = matchRounds.reduce((acc, r) => acc + r.b2_points, 0);
 
   const openBattle = (match: Match) => {
     setMatchRounds([]);
+    setRoundType('finish');
+    setFoulBladerId('');
     setBattleModal(match);
     setCurrentRoundForm({
       winner_id: match.blader1_id,
@@ -146,23 +146,66 @@ export default function TournamentDetail() {
 
   const handleRoundResult = async () => {
     if (!battleModal) return;
+    let newRound: BattleRound;
+    const roundNum = matchRounds.length + 1;
     const { winner_id, finish_type, bey1, bey2 } = currentRoundForm;
-    if (!winner_id) return;
 
-    const pts = FINISH_POINTS[finish_type];
-    const isB1Winner = winner_id === b1Id;
-    const newRound = {
-      winnerId: winner_id,
-      finishType: finish_type,
-      b1Pts: isB1Winner ? pts : 0,
-      b2Pts: isB1Winner ? 0 : pts,
-      bey1: bey1 || undefined,
-      bey2: bey2 || undefined,
-    };
+    if (roundType === 'draw') {
+      newRound = {
+        round_num: roundNum,
+        round_type: 'draw',
+        finish_type: 'draw',
+        b1_points: 0,
+        b2_points: 0,
+        bey1: bey1 || undefined,
+        bey2: bey2 || undefined,
+      };
+    } else if (roundType === 'foul') {
+      if (!foulBladerId) return;
+      let b1Pts = 0;
+      let b2Pts = 0;
+
+      if (foulBladerId === b1Id) {
+        const prevFouls = matchRounds.filter(r => r.round_type === 'foul' && r.foul_blader_id === b1Id).length;
+        if ((prevFouls + 1) % 2 === 0) {
+          b2Pts = 1;
+        }
+      } else {
+        const prevFouls = matchRounds.filter(r => r.round_type === 'foul' && r.foul_blader_id === b2Id).length;
+        if ((prevFouls + 1) % 2 === 0) {
+          b1Pts = 1;
+        }
+      }
+
+      newRound = {
+        round_num: roundNum,
+        round_type: 'foul',
+        finish_type: 'foul',
+        foul_blader_id: foulBladerId,
+        b1_points: b1Pts,
+        b2_points: b2Pts,
+        bey1: bey1 || undefined,
+        bey2: bey2 || undefined,
+      };
+    } else {
+      if (!winner_id) return;
+      const pts = FINISH_POINTS[finish_type];
+      const isB1Winner = winner_id === b1Id;
+      newRound = {
+        round_num: roundNum,
+        round_type: 'finish',
+        winner_id,
+        finish_type,
+        b1_points: isB1Winner ? pts : 0,
+        b2_points: isB1Winner ? 0 : pts,
+        bey1: bey1 || undefined,
+        bey2: bey2 || undefined,
+      };
+    }
 
     const updatedRounds = [...matchRounds, newRound];
-    const newScore1 = updatedRounds.reduce((acc, r) => acc + r.b1Pts, 0);
-    const newScore2 = updatedRounds.reduce((acc, r) => acc + r.b2Pts, 0);
+    const newScore1 = updatedRounds.reduce((acc, r) => acc + r.b1_points, 0);
+    const newScore2 = updatedRounds.reduce((acc, r) => acc + r.b2_points, 0);
     setMatchRounds(updatedRounds);
 
     const isMatchOver = newScore1 >= tournament.point_threshold || newScore2 >= tournament.point_threshold;
@@ -170,19 +213,22 @@ export default function TournamentDetail() {
     if (isMatchOver) {
       try {
         const finalWinnerId = newScore1 >= tournament.point_threshold ? b1Id : b2Id;
+        const lastFinishType = newRound.round_type === 'finish' ? (newRound.finish_type || 'spin') : newRound.round_type;
         await addMatchResult({
           match_id: battleModal.id,
           winner_id: finalWinnerId,
           blader1_points: newScore1,
           blader2_points: newScore2,
-          finish_type: finish_type,
+          finish_type: lastFinishType,
           bey1: bey1 || undefined,
           bey2: bey2 || undefined,
+          rounds: updatedRounds,
         });
         addToast(lang === 'it' ? 'Match completato!' : 'Match completed!', 'success');
         setBattleModal(null);
         setMatchPhase('setup');
-      } catch {
+      } catch (e: any) {
+        console.error(e);
         addToast(lang === 'it' ? 'Errore!' : 'Error!', 'error');
       }
     } else {
@@ -193,6 +239,8 @@ export default function TournamentDetail() {
   const cancelMatch = () => {
     setBattleModal(null);
     setMatchRounds([]);
+    setRoundType('finish');
+    setFoulBladerId('');
     setMatchPhase('setup');
   };
 
@@ -736,36 +784,124 @@ export default function TournamentDetail() {
           maxWidth={500}
           closeOnOverlayClick={false}
         >
-          {/* VS display */}
-          <div className="flex items-center gap-md" style={{ marginBottom: 24, justifyContent: 'center' }}>
-            <BladerPill blader={b1} selected={currentRoundForm.winner_id === b1.id} onClick={() => setCurrentRoundForm((f) => ({ ...f, winner_id: b1.id }))} id="winner-b1" />
-            <span style={{ fontFamily: 'Orbitron', fontWeight: 900, color: 'var(--secondary)', fontSize: '1rem' }}>VS</span>
-            <BladerPill blader={b2} selected={currentRoundForm.winner_id === b2.id} onClick={() => setCurrentRoundForm((f) => ({ ...f, winner_id: b2.id }))} id="winner-b2" />
+          {/* Outcome Type Selector */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+            <button
+              className={`btn ${roundType === 'finish' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setRoundType('finish')}
+              style={{ flex: 1 }}
+              id="btn-outcome-finish"
+            >
+              {lang === 'it' ? 'Vittoria' : 'Winner'}
+            </button>
+            <button
+              className={`btn ${roundType === 'draw' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setRoundType('draw')}
+              style={{ flex: 1 }}
+              id="btn-outcome-draw"
+            >
+              {lang === 'it' ? 'Pareggio' : 'Draw'}
+            </button>
+            <button
+              className={`btn ${roundType === 'foul' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setRoundType('foul')}
+              style={{ flex: 1 }}
+              id="btn-outcome-foul"
+            >
+              {lang === 'it' ? 'Fallo' : 'Foul'}
+            </button>
           </div>
 
-          <div className="form-label" style={{ marginBottom: 8 }}>{lang === 'it' ? 'Vincitore' : 'Winner'}</div>
-          <div style={{ fontFamily: 'Orbitron', fontSize: '0.9rem', color: 'var(--accent)', textAlign: 'center', marginBottom: 20 }}>
-            {currentRoundForm.winner_id ? bladerMap[currentRoundForm.winner_id]?.name || '?' : '—'}
-          </div>
+          {roundType === 'finish' && (
+            <>
+              {/* VS display */}
+              <div className="flex items-center gap-md" style={{ marginBottom: 24, justifyContent: 'center' }}>
+                <BladerPill blader={b1} selected={currentRoundForm.winner_id === b1.id} onClick={() => setCurrentRoundForm((f) => ({ ...f, winner_id: b1.id }))} id="winner-b1" />
+                <span style={{ fontFamily: 'Orbitron', fontWeight: 900, color: 'var(--secondary)', fontSize: '1rem' }}>VS</span>
+                <BladerPill blader={b2} selected={currentRoundForm.winner_id === b2.id} onClick={() => setCurrentRoundForm((f) => ({ ...f, winner_id: b2.id }))} id="winner-b2" />
+              </div>
 
-          <div className="form-label" style={{ marginBottom: 8 }}>{lang === 'it' ? 'Tipo di Finish' : 'Finish Type'}</div>
-          <div className="grid-2" style={{ gap: 8, marginBottom: 20 }}>
-            {FINISHES.map((f) => (
-              <button
-                key={f}
-                type="button"
-                className={`btn ${currentRoundForm.finish_type === f ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setCurrentRoundForm((bf) => ({ ...bf, finish_type: f }))}
-                id={`finish-${f}`}
-                style={{ borderColor: currentRoundForm.finish_type === f ? FINISH_COLORS[f] : undefined, background: currentRoundForm.finish_type === f ? `${FINISH_COLORS[f]}22` : undefined }}
-              >
-                <div>
-                  <div style={{ color: FINISH_COLORS[f] }}>{FINISH_LABELS[f]}</div>
-                  <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>+{FINISH_POINTS[f]} pts</div>
-                </div>
-              </button>
-            ))}
-          </div>
+              <div className="form-label" style={{ marginBottom: 8 }}>{lang === 'it' ? 'Vincitore' : 'Winner'}</div>
+              <div style={{ fontFamily: 'Orbitron', fontSize: '0.9rem', color: 'var(--accent)', textAlign: 'center', marginBottom: 20 }}>
+                {currentRoundForm.winner_id ? bladerMap[currentRoundForm.winner_id]?.name || '?' : '—'}
+              </div>
+
+              <div className="form-label" style={{ marginBottom: 8 }}>{lang === 'it' ? 'Tipo di Finish' : 'Finish Type'}</div>
+              <div className="grid-2" style={{ gap: 8, marginBottom: 20 }}>
+                {FINISHES.map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    className={`btn ${currentRoundForm.finish_type === f ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setCurrentRoundForm((bf) => ({ ...bf, finish_type: f }))}
+                    id={`finish-${f}`}
+                    style={{ borderColor: currentRoundForm.finish_type === f ? FINISH_COLORS[f] : undefined, background: currentRoundForm.finish_type === f ? `${FINISH_COLORS[f]}22` : undefined }}
+                  >
+                    <div>
+                      <div style={{ color: FINISH_COLORS[f] }}>{FINISH_LABELS[f]}</div>
+                      <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>+{FINISH_POINTS[f]} pts</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {roundType === 'draw' && (
+            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 24 }}>
+              📢 {lang === 'it' ? 'Pareggio registrato. Nessun punto assegnato a nessuno dei blader.' : 'Draw recorded. No points awarded to either blader.'}
+            </div>
+          )}
+
+          {roundType === 'foul' && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontFamily: 'Orbitron', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 12, letterSpacing: 2, textAlign: 'center' }}>
+                {lang === 'it' ? 'CHI HA COMMESSO IL FALLO?' : 'WHO COMMITTED THE FOUL?'}
+              </div>
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => setFoulBladerId(b1Id)}
+                  style={{
+                    flex: 1, padding: '12px 16px', borderRadius: 12, cursor: 'pointer',
+                    background: foulBladerId === b1Id ? 'rgba(255,170,0,0.18)' : 'var(--surface-2)',
+                    border: `2px solid ${foulBladerId === b1Id ? '#ffaa00' : 'var(--border)'}`,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+                    transition: 'all 0.2s',
+                  }}
+                  id="btn-t-foul-b1"
+                >
+                  <div className="avatar avatar-md" style={{ background: b1.avatar_color, color: 'white', overflow: 'hidden' }}>
+                    {b1.avatar_image ? <img src={b1.avatar_image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : b1.avatar_initials}
+                  </div>
+                  <span style={{ fontFamily: 'Orbitron', fontSize: '0.7rem', fontWeight: 700, color: foulBladerId === b1Id ? '#ffaa00' : 'var(--text)' }}>
+                    {b1.name}
+                  </span>
+                  {foulBladerId === b1Id && <span style={{ fontSize: '0.6rem', color: '#ffaa00', fontFamily: 'Orbitron' }}>FALLO</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFoulBladerId(b2Id)}
+                  style={{
+                    flex: 1, padding: '12px 16px', borderRadius: 12, cursor: 'pointer',
+                    background: foulBladerId === b2Id ? 'rgba(255,170,0,0.18)' : 'var(--surface-2)',
+                    border: `2px solid ${foulBladerId === b2Id ? '#ffaa00' : 'var(--border)'}`,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+                    transition: 'all 0.2s',
+                  }}
+                  id="btn-t-foul-b2"
+                >
+                  <div className="avatar avatar-md" style={{ background: b2.avatar_color, color: 'white', overflow: 'hidden' }}>
+                    {b2.avatar_image ? <img src={b2.avatar_image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : b2.avatar_initials}
+                  </div>
+                  <span style={{ fontFamily: 'Orbitron', fontSize: '0.7rem', fontWeight: 700, color: foulBladerId === b2Id ? '#ffaa00' : 'var(--text)' }}>
+                    {b2.name}
+                  </span>
+                  {foulBladerId === b2Id && <span style={{ fontSize: '0.6rem', color: '#ffaa00', fontFamily: 'Orbitron' }}>FALLO</span>}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Bey selection: only show if format is 3on3 or deck */}
           {(tournament.format === '3on3' || tournament.format === 'deck') && (
@@ -783,7 +919,7 @@ export default function TournamentDetail() {
             <button
               className="btn btn-primary"
               onClick={handleRoundResult}
-              disabled={!currentRoundForm.winner_id}
+              disabled={(roundType === 'finish' && !currentRoundForm.winner_id) || (roundType === 'foul' && !foulBladerId)}
               id="confirm-battle"
             >
               <Trophy size={16} /> {lang === 'it' ? 'Conferma Risultato' : 'Confirm Result'}
@@ -826,18 +962,49 @@ export default function TournamentDetail() {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {matchRounds.map((r, idx) => {
-                const roundWinner = bladerMap[r.winnerId];
+                let text = '';
+                let color = 'var(--text)';
+                let badgeText = '';
+                let badgeColor = '';
+                let ptsText = '';
+
+                if (r.round_type === 'draw') {
+                  text = lang === 'it' ? 'Pareggio' : 'Draw';
+                  color = 'var(--text-muted)';
+                  badgeText = lang === 'it' ? 'Pareggio' : 'Draw';
+                  badgeColor = FINISH_COLORS.draw;
+                } else if (r.round_type === 'foul') {
+                  const foulBlader = bladerMap[r.foul_blader_id || '']?.name || 'Blader';
+                  text = lang === 'it' ? `Fallo commesso da ${foulBlader}` : `Foul committed by ${foulBlader}`;
+                  color = '#ffaa00';
+                  badgeText = lang === 'it' ? 'Fallo' : 'Foul';
+                  badgeColor = FINISH_COLORS.foul;
+                  if (r.b1_points > 0) {
+                    const opponent = bladerMap[b1Id]?.name || 'Player 1';
+                    text += ` (+1 pt a ${opponent})`;
+                  } else if (r.b2_points > 0) {
+                    const opponent = bladerMap[b2Id]?.name || 'Player 2';
+                    text += ` (+1 pt a ${opponent})`;
+                  }
+                } else {
+                  const roundWinner = bladerMap[r.winner_id || ''];
+                  text = roundWinner?.name || '—';
+                  badgeText = FINISH_LABELS[r.finish_type || 'spin'];
+                  badgeColor = FINISH_COLORS[r.finish_type || 'spin'];
+                  ptsText = ` (+${r.b1_points || r.b2_points})`;
+                }
+
                 return (
                   <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyItems: 'space-between', padding: '6px 10px', background: 'var(--surface-3)', borderRadius: 6 }}>
                     <span style={{ fontFamily: 'Orbitron', fontSize: '0.65rem', color: 'var(--text-muted)', marginRight: 10 }}>R{idx + 1}</span>
-                    <span style={{ fontWeight: 600, fontSize: '0.85rem', flex: 1, color: roundWinner ? 'var(--accent)' : 'white' }}>{roundWinner?.name || '—'}</span>
+                    <span style={{ fontWeight: 600, fontSize: '0.85rem', flex: 1, color }}>{text}</span>
                     <span style={{
                       fontSize: '0.65rem', padding: '2px 8px', borderRadius: 99,
-                      background: `${FINISH_COLORS[r.finishType]}22`,
-                      color: FINISH_COLORS[r.finishType],
+                      background: `${badgeColor}22`,
+                      color: badgeColor,
                       fontWeight: 700, textTransform: 'uppercase'
                     }}>
-                      {FINISH_LABELS[r.finishType]} (+{r.b1Pts || r.b2Pts})
+                      {badgeText}{ptsText}
                     </span>
                   </div>
                 );

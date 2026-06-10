@@ -151,6 +151,7 @@ pub struct MatchResultArgs {
     pub finish_type: String,
     pub bey1: Option<String>,
     pub bey2: Option<String>,
+    pub rounds: Vec<crate::db::BattleRound>,
 }
 
 #[tauri::command]
@@ -164,7 +165,8 @@ pub async fn add_match_result(
         db.add_match_result(
             &args.match_id, &args.winner_id,
             args.blader1_points, args.blader2_points,
-            &args.finish_type, args.bey1.as_deref(), args.bey2.as_deref()
+            &args.finish_type, args.bey1.as_deref(), args.bey2.as_deref(),
+            args.rounds
         ).map_err(|e| e.to_string())?;
     }
     // Broadcast update to all connected mobile clients
@@ -179,9 +181,11 @@ pub async fn add_match_result(
 
 #[derive(serde::Deserialize)]
 pub struct VersusResultArgs {
+    pub blader1_id: String,
+    pub blader2_id: String,
     pub winner_id: String,
-    pub loser_id: String,
     pub winner_points: i32,
+    pub rounds: Vec<crate::db::BattleRound>,
 }
 
 #[tauri::command]
@@ -190,7 +194,18 @@ pub async fn record_versus_battle(
     args: VersusResultArgs,
 ) -> Result<(), String> {
     let db = db.lock().await;
-    db.record_versus_battle(&args.winner_id, &args.loser_id, args.winner_points)
+    db.record_versus_battle(&args.blader1_id, &args.blader2_id, &args.winner_id, args.rounds)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_battle_history(
+    db: DbState<'_>,
+    blader_id: String,
+) -> Result<serde_json::Value, String> {
+    let db = db.lock().await;
+    db.get_battle_history_for_blader(&blader_id)
+        .map(|h| json!(h))
         .map_err(|e| e.to_string())
 }
 

@@ -3,6 +3,36 @@ use serde::{Deserialize, Serialize};
 use chrono::Utc;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BattleRound {
+    pub round_num: i32,
+    pub round_type: String, // "finish", "draw", "foul"
+    pub winner_id: Option<String>,
+    pub finish_type: Option<String>,
+    pub foul_blader_id: Option<String>,
+    pub b1_points: i32,
+    pub b2_points: i32,
+    pub bey1: Option<String>,
+    pub bey2: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BattleRecord {
+    pub id: String,
+    pub battle_type: String, // "versus", "challenge", "tournament"
+    pub associated_id: Option<String>,
+    pub associated_name: Option<String>,
+    pub blader1_id: String,
+    pub blader1_name: String,
+    pub blader2_id: String,
+    pub blader2_name: String,
+    pub winner_id: Option<String>,
+    pub blader1_points: i32,
+    pub blader2_points: i32,
+    pub rounds: Vec<BattleRound>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Blader {
     pub id: String,
     pub name: String,
@@ -171,6 +201,21 @@ impl Database {
                 message_en TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS battle_history (
+                id TEXT PRIMARY KEY,
+                battle_type TEXT NOT NULL,
+                associated_id TEXT,
+                associated_name TEXT,
+                blader1_id TEXT NOT NULL,
+                blader1_name TEXT NOT NULL,
+                blader2_id TEXT NOT NULL,
+                blader2_name TEXT NOT NULL,
+                winner_id TEXT,
+                blader1_points INTEGER NOT NULL DEFAULT 0,
+                blader2_points INTEGER NOT NULL DEFAULT 0,
+                rounds TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL
+            );
         ")?;
 
         // Migration to add beys column if missing
@@ -180,6 +225,7 @@ impl Database {
 
         Ok(())
     }
+
 
     // ─── Bladers ─────────────────────────────────────────────────────────────
 
@@ -424,33 +470,115 @@ impl Database {
 
     // ─── Versus Battles ──────────────────────────────────────────────────────
 
-    pub fn record_versus_battle(&self, winner_id: &str, loser_id: &str, winner_pts: i32) -> Result<()> {
-        self.conn.execute(
-            "UPDATE bladers SET wins=wins+1, points_total=points_total+?1 WHERE id=?2",
-            rusqlite::params![winner_pts, winner_id],
-        )?;
-        self.conn.execute(
-            "UPDATE bladers SET losses=losses+1 WHERE id=?1",
-            rusqlite::params![loser_id],
-        )?;
-
-        let winner_name: String = self.conn.query_row(
+    pub fn record_versus_battle(&self, blader1_id: &str, blader2_id: &str, winner_id: &str, rounds: Vec<BattleRound>) -> Result<()> {
+        let b1_name: String = self.conn.query_row(
             "SELECT name FROM bladers WHERE id=?1",
-            rusqlite::params![winner_id],
+            rusqlite::params![blader1_id],
             |row| row.get(0),
         ).unwrap_or_else(|_| "Unknown".to_string());
         
-        let loser_name: String = self.conn.query_row(
+        let b2_name: String = self.conn.query_row(
             "SELECT name FROM bladers WHERE id=?1",
-            rusqlite::params![loser_id],
+            rusqlite::params![blader2_id],
             |row| row.get(0),
         ).unwrap_or_else(|_| "Unknown".to_string());
 
-        let msg_it = format!("Sfida Versus: {} ha sconfitto {} (+{} pt)", winner_name, loser_name, winner_pts);
-        let msg_en = format!("Versus Battle: {} defeated {} (+{} pts)", winner_name, loser_name, winner_pts);
-        let _ = self.log_activity("versus", &msg_it, &msg_en);
+        let mut blader1_points = 0;
+        let mut blader2_points = 0;
+        for r in &rounds {
+            blader1_points += r.b1_points;
+            blader2_points += r.b2_points;
+        }
 
+        let record = BattleRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            battle_type: "versus".to_string(),
+            associated_id: None,
+            associated_name: None,
+            blader1_id: blader1_id.to_string(),
+            blader1_name: b1_name,
+            blader2_id: blader2_id.to_string(),
+            blader2_name: b2_name,
+            winner_id: Some(winner_id.to_string()),
+            blader1_points,
+            blader2_points,
+            rounds,
+            created_at: Utc::now().to_rfc3339(),
+        };
+
+        self.record_battle(&record)
+    }
+
+    pub fn record_battle(&self, record: &BattleRecord) -> Result<()> {
+        let rounds_str = serde_json::to_string(&record.rounds).unwrap_or_else(|_| "[]".to_string());
+        self.conn.execute(
+            "INSERT INTO battle_history (id, battle_type, associated_id, associated_name, blader1_id, blader1_name, blader2_id, blader2_name, winner_id, blader1_points, blader2_points, rounds, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            rusqlite::params![
+                record.id,
+                record.battle_type,
+                record.associated_id,
+                record.associated_name,
+                record.blader1_id,
+                record.blader1_name,
+                record.blader2_id,
+                record.blader2_name,
+                record.winner_id,
+                record.blader1_points,
+                record.blader2_points,
+                rounds_str,
+                record.created_at,
+            ],
+        )?;
+
+        if record.battle_type == "versus" || record.battle_type == "challenge" {
+            if let Some(ref w_id) = record.winner_id {
+                let loser_id = if w_id == &record.blader1_id { &record.blader2_id } else { &record.blader1_id };
+                let winner_pts = if w_id == &record.blader1_id { record.blader1_points } else { record.blader2_points };
+
+                self.conn.execute(
+                    "UPDATE bladers SET wins=wins+1, points_total=points_total+?1 WHERE id=?2",
+                    rusqlite::params![winner_pts, w_id],
+                )?;
+                self.conn.execute(
+                    "UPDATE bladers SET losses=losses+1 WHERE id=?1",
+                    rusqlite::params![loser_id],
+                )?;
+
+                let activity_type = if record.battle_type == "challenge" { "challenge" } else { "versus" };
+                let msg_it = format!("Sfida {}: {} ha sconfitto {} (+{} pt)", if record.battle_type == "challenge" { "Lobby" } else { "Versus" }, record.blader1_name, record.blader2_name, winner_pts);
+                let msg_en = format!("{} Battle: {} defeated {} (+{} pts)", if record.battle_type == "challenge" { "Lobby" } else { "Versus" }, record.blader1_name, record.blader2_name, winner_pts);
+                let _ = self.log_activity(activity_type, &msg_it, &msg_en);
+            }
+        }
         Ok(())
+    }
+
+    pub fn get_battle_history_for_blader(&self, blader_id: &str) -> Result<Vec<BattleRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, battle_type, associated_id, associated_name, blader1_id, blader1_name, blader2_id, blader2_name, winner_id, blader1_points, blader2_points, rounds, created_at FROM battle_history WHERE blader1_id=?1 OR blader2_id=?1 ORDER BY datetime(created_at) DESC"
+        )?;
+        let history = stmt.query_map(rusqlite::params![blader_id], |row| {
+            let rounds_str: String = row.get(11)?;
+            let rounds: Vec<BattleRound> = serde_json::from_str(&rounds_str).unwrap_or_default();
+            Ok(BattleRecord {
+                id: row.get(0)?,
+                battle_type: row.get(1)?,
+                associated_id: row.get(2)?,
+                associated_name: row.get(3)?,
+                blader1_id: row.get(4)?,
+                blader1_name: row.get(5)?,
+                blader2_id: row.get(6)?,
+                blader2_name: row.get(7)?,
+                winner_id: row.get(8)?,
+                blader1_points: row.get(9)?,
+                blader2_points: row.get(10)?,
+                rounds,
+                created_at: row.get(12)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+        Ok(history)
     }
 
     // ─── Tournaments ─────────────────────────────────────────────────────────
@@ -608,7 +736,8 @@ impl Database {
     pub fn add_match_result(
         &self, match_id: &str, winner_id: &str,
         b1_points: i32, b2_points: i32, finish_type: &str,
-        bey1: Option<&str>, bey2: Option<&str>
+        bey1: Option<&str>, bey2: Option<&str>,
+        rounds: Vec<BattleRound>
     ) -> Result<()> {
         // 1. Save the result
         self.conn.execute(
@@ -617,17 +746,13 @@ impl Database {
         )?;
 
         // 2. Update blader stats
-        let (tournament_id, current_round, blader1_id): (String, i32, String) = self.conn.query_row(
-            "SELECT tournament_id, round, blader1_id FROM matches WHERE id=?1",
+        let (tournament_id, current_round, blader1_id, blader2_id): (String, i32, String, String) = self.conn.query_row(
+            "SELECT tournament_id, round, blader1_id, blader2_id FROM matches WHERE id=?1",
             rusqlite::params![match_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )?;
         let winner_points = if winner_id == blader1_id { b1_points } else { b2_points };
-        let loser_id: String = self.conn.query_row(
-            "SELECT CASE WHEN blader1_id=?1 THEN blader2_id ELSE blader1_id END FROM matches WHERE id=?2",
-            rusqlite::params![winner_id, match_id],
-            |row| row.get(0),
-        )?;
+        let loser_id = if winner_id == blader1_id { &blader2_id } else { &blader1_id };
         self.conn.execute(
             "UPDATE bladers SET wins=wins+1, points_total=points_total+?1 WHERE id=?2",
             rusqlite::params![winner_points, winner_id],
@@ -661,6 +786,37 @@ impl Database {
             rusqlite::params![loser_id],
             |row| row.get(0),
         ).unwrap_or_else(|_| "Unknown".to_string());
+
+        let b1_name: String = self.conn.query_row(
+            "SELECT name FROM bladers WHERE id=?1",
+            rusqlite::params![&blader1_id],
+            |row| row.get(0),
+        ).unwrap_or_else(|_| "Unknown".to_string());
+
+        let b2_name: String = self.conn.query_row(
+            "SELECT name FROM bladers WHERE id=?1",
+            rusqlite::params![&blader2_id],
+            |row| row.get(0),
+        ).unwrap_or_else(|_| "Unknown".to_string());
+
+        if finish_type != "bye" {
+            let record = BattleRecord {
+                id: match_id.to_string(),
+                battle_type: "tournament".to_string(),
+                associated_id: Some(tournament_id.clone()),
+                associated_name: Some(tournament_name.clone()),
+                blader1_id: blader1_id.clone(),
+                blader1_name: b1_name,
+                blader2_id: blader2_id.clone(),
+                blader2_name: b2_name,
+                winner_id: Some(winner_id.to_string()),
+                blader1_points: b1_points,
+                blader2_points: b2_points,
+                rounds,
+                created_at: Utc::now().to_rfc3339(),
+            };
+            let _ = self.record_battle(&record);
+        }
 
         let msg_it = format!("Torneo '{}': {} ha sconfitto {} nel Round {}", tournament_name, winner_name, loser_name, current_round);
         let msg_en = format!("Tournament '{}': {} defeated {} in Round {}", tournament_name, winner_name, loser_name, current_round);

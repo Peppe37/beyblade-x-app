@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { api } from '../services/api';
 import { create } from 'zustand';
 import { Blader, Tournament, TournamentDetail, Lang, CustomBey, Arena } from '../types';
 
@@ -20,7 +20,7 @@ export const useSettings = create<SettingsStore>((set) => ({
   },
   fetchLocalIp: async () => {
     try {
-      const ip = await invoke<string>('get_local_ip');
+      const ip = await api.getLocalIp();
       set({ localIp: ip });
     } catch {
       set({ localIp: '127.0.0.1' });
@@ -50,7 +50,7 @@ export const useBladers = create<BladersStore>((set, get) => ({
   fetchBladers: async () => {
     set({ loading: true });
     try {
-      const bladers = await invoke<Blader[]>('get_bladers');
+      const bladers = await api.getBladers();
       set({ bladers, loading: false });
     } catch (e) {
       console.error('fetchBladers error:', e);
@@ -59,33 +59,31 @@ export const useBladers = create<BladersStore>((set, get) => ({
   },
   fetchCustomBeys: async () => {
     try {
-      const customBeys = await invoke<CustomBey[]>('get_custom_beys');
+      const customBeys = await api.getCustomBeys();
       set({ customBeys });
     } catch (e) {
       console.error('fetchCustomBeys error:', e);
     }
   },
   createBlader: async (name, color, image, password) => {
-    const blader = await invoke<Blader>('create_blader', {
-      name, avatarColor: color, avatarImage: image ?? null, password: password ?? null
-    });
+    const blader = await api.createBlader(name, color, image, password);
     set((s) => ({ bladers: [...s.bladers, blader] }));
     return blader;
   },
   updateBlader: async (id, name, color, image, beys = [], password) => {
-    await invoke('update_blader', { id, name, avatarColor: color, avatarImage: image ?? null, beys, password: password ?? null });
+    await api.updateBlader(id, name, color, image, beys, password);
     await get().fetchBladers();
   },
   deleteBlader: async (id) => {
-    await invoke('delete_blader', { id });
+    await api.deleteBlader(id);
     set((s) => ({ bladers: s.bladers.filter((b) => b.id !== id) }));
   },
   createCustomBey: async (args) => {
-    await invoke('create_custom_bey', { args });
+    await api.createCustomBey(args);
     await get().fetchCustomBeys();
   },
   deleteCustomBey: async (id) => {
-    await invoke('delete_custom_bey', { id });
+    await api.deleteCustomBey(id);
     await get().fetchCustomBeys();
   },
 }));
@@ -116,6 +114,7 @@ interface TournamentsStore {
     finish_type: string;
     bey1?: string;
     bey2?: string;
+    rounds?: any[];
   }) => Promise<void>;
 }
 
@@ -126,28 +125,28 @@ export const useTournaments = create<TournamentsStore>((set, get) => ({
   fetchTournaments: async () => {
     set({ loading: true });
     try {
-      const tournaments = await invoke<Tournament[]>('get_tournaments');
+      const tournaments = await api.getTournaments();
       set({ tournaments, loading: false });
     } catch {
       set({ loading: false });
     }
   },
   createTournament: async (args) => {
-    const tournament = await invoke<Tournament>('create_tournament', { args });
+    const tournament = await api.createTournament(args);
     set((s) => ({ tournaments: [tournament, ...s.tournaments] }));
     return tournament;
   },
   fetchTournamentDetail: async (id) => {
     set({ loading: true });
     try {
-      const detail = await invoke<TournamentDetail>('get_tournament', { id });
+      const detail = await api.getTournament(id);
       set({ currentDetail: detail, loading: false });
     } catch {
       set({ loading: false });
     }
   },
   addMatchResult: async (args) => {
-    await invoke('add_match_result', { args });
+    await api.addMatchResult(args);
     // Refresh the current detail
     const detail = get().currentDetail;
     if (detail) {
@@ -155,16 +154,16 @@ export const useTournaments = create<TournamentsStore>((set, get) => ({
     }
   },
   updateTournament: async (id, name, arena, point_threshold, format) => {
-    await invoke('update_tournament', { args: { id, name, arena, point_threshold, format } });
+    await api.updateTournament({ id, name, arena, point_threshold, format });
     await get().fetchTournamentDetail(id);
     await get().fetchTournaments();
   },
   deleteTournament: async (id) => {
-    await invoke('delete_tournament', { id });
+    await api.deleteTournament(id);
     set((s) => ({ tournaments: s.tournaments.filter(t => t.id !== id), currentDetail: null }));
   },
   resetTournament: async (id) => {
-    await invoke('reset_tournament', { id });
+    await api.resetTournament(id);
     await get().fetchTournamentDetail(id);
   },
 }));
@@ -211,7 +210,7 @@ export const useArenas = create<ArenasStore>((set) => ({
   fetchCustomArenas: async () => {
     set({ loading: true });
     try {
-      const customArenas = await invoke<Arena[]>('get_custom_arenas');
+      const customArenas = await api.getCustomArenas();
       set({ customArenas, loading: false });
     } catch (e) {
       console.error('fetchCustomArenas error:', e);
@@ -219,14 +218,14 @@ export const useArenas = create<ArenasStore>((set) => ({
     }
   },
   createCustomArena: async (name, description, maxPlayers, hasXtremeLine, tags, color) => {
-    const arena = await invoke<Arena>('create_custom_arena', {
-      args: { name, description, maxPlayers, hasXtremeLine, tags, color }
+    const arena = await api.createCustomArena({
+      name, description, maxPlayers, hasXtremeLine, tags, color
     });
     set((s) => ({ customArenas: [...s.customArenas, arena] }));
     return arena;
   },
   deleteCustomArena: async (id) => {
-    await invoke('delete_custom_arena', { id });
+    await api.deleteCustomArena(id);
     set((s) => ({ customArenas: s.customArenas.filter((a) => a.id !== id) }));
   },
 }));

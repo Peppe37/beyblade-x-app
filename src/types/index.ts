@@ -30,7 +30,7 @@ export interface CustomBey {
 
 // ─── Finish Types ───────────────────────────────────────────────────────────
 
-export type FinishType = 'spin' | 'over' | 'burst' | 'xtreme' | 'bye';
+export type FinishType = 'spin' | 'over' | 'burst' | 'xtreme' | 'bye' | 'foul' | 'draw';
 
 export const FINISH_POINTS: Record<FinishType, number> = {
   spin: 1,
@@ -38,6 +38,8 @@ export const FINISH_POINTS: Record<FinishType, number> = {
   burst: 2,
   xtreme: 3,
   bye: 0,
+  foul: 0,
+  draw: 0,
 };
 
 export const FINISH_LABELS: Record<FinishType, string> = {
@@ -46,6 +48,8 @@ export const FINISH_LABELS: Record<FinishType, string> = {
   burst: 'Burst Finish',
   xtreme: 'Xtreme Finish',
   bye: 'Turno Libero',
+  foul: 'Fallo',
+  draw: 'Pareggio',
 };
 
 export const FINISH_COLORS: Record<FinishType, string> = {
@@ -54,7 +58,38 @@ export const FINISH_COLORS: Record<FinishType, string> = {
   burst: 'var(--danger)',
   xtreme: 'var(--accent)',
   bye: 'var(--text-muted)',
+  foul: '#ffaa00',
+  draw: '#888888',
 };
+
+export interface BattleRound {
+  round_num: number;
+  round_type: 'finish' | 'draw' | 'foul';
+  winner_id?: string;
+  finish_type?: FinishType;
+  foul_blader_id?: string;
+  b1_points: number;
+  b2_points: number;
+  bey1?: string;
+  bey2?: string;
+}
+
+export interface BattleRecord {
+  id: string;
+  battle_type: 'versus' | 'challenge' | 'tournament';
+  associated_id?: string;
+  associated_name?: string;
+  blader1_id: string;
+  blader1_name: string;
+  blader2_id: string;
+  blader2_name: string;
+  winner_id?: string;
+  blader1_points: number;
+  blader2_points: number;
+  rounds: BattleRound[];
+  created_at: string;
+}
+
 
 // ─── Battle Modes ───────────────────────────────────────────────────────────
 

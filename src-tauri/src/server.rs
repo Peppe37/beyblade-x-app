@@ -6,13 +6,14 @@ use axum::{
     extract::{Path, State, WebSocketUpgrade, Query},
     extract::ws::{WebSocket, Message},
     response::{Html, IntoResponse},
-    routing::{get, post, delete},
+    routing::{get, post, delete, put},
     Json,
 };
 use tower_http::cors::{CorsLayer, Any};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use crate::db::Database;
+use chrono::Utc;
 
 #[derive(Clone)]
 pub struct LobbyConnection {
@@ -36,9 +37,13 @@ pub struct ChallengeState {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct LiveMatchRound {
-    pub winner_id: String,
-    pub finish_type: String,
-    pub points: i32,
+    pub round_num: i32,
+    pub round_type: String, // "finish", "draw", "foul"
+    pub winner_id: Option<String>,
+    pub finish_type: Option<String>,
+    pub foul_blader_id: Option<String>,
+    pub b1_points: i32,
+    pub b2_points: i32,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -54,6 +59,8 @@ pub struct LiveMatchState {
     pub opponent_points: i32,
     pub challenger_wins: i32,
     pub opponent_wins: i32,
+    pub challenger_fouls: i32,
+    pub opponent_fouls: i32,
     pub rounds: Vec<LiveMatchRound>,
     pub status: String,
 }
@@ -104,15 +111,22 @@ pub async fn start_server(db: Arc<Mutex<Database>>, ws_state: Arc<WsState>) {
         .route("/ws/:code", get(ws_handler))
         .route("/api/tournament/:code", get(get_tournament_api))
         .route("/api/tournament/:code/matches", get(get_matches_api))
-        .route("/api/bladers", get(get_all_bladers_api))
-        .route("/api/tournaments", get(get_all_tournaments_api))
+        .route("/api/bladers", get(get_all_bladers_api).post(create_blader_api))
+        .route("/api/bladers/:id", put(update_blader_api).delete(delete_blader_api))
+        .route("/api/tournaments", get(get_all_tournaments_api).post(create_tournament_api))
+        .route("/api/tournaments/:id", get(get_tournament_details_api).put(update_tournament_api).delete(delete_tournament_api))
+        .route("/api/tournaments/:id/reset", post(reset_tournament_api))
+        .route("/api/tournaments/:id/match-result", post(add_match_result_api))
+        .route("/api/versus", post(record_versus_battle_api))
+        .route("/api/blader/:id/history", get(get_blader_history_api))
         .route("/api/auth/login", post(auth_login))
         .route("/api/auth/register", post(auth_register))
         .route("/api/auth/change-password", post(auth_change_password))
         .route("/api/custom-beys", get(get_custom_beys_api).post(create_custom_bey_api))
         .route("/api/custom-beys/:id", delete(delete_custom_bey_api))
         .route("/api/blader/deck", post(update_blader_deck_api))
-        .route("/api/custom-arenas", get(get_custom_arenas_api))
+        .route("/api/custom-arenas", get(get_custom_arenas_api).post(create_custom_arena_api))
+        .route("/api/custom-arenas/:id", delete(delete_custom_arena_api))
         .route("/api/activities", get(get_activities_api))
         .layer(cors)
         .with_state(state);
@@ -563,6 +577,8 @@ async fn handle_ws(mut socket: WebSocket, code: String, state: AppState) {
                                 opponent_points: 0,
                                 challenger_wins: 0,
                                 opponent_wins: 0,
+                                challenger_fouls: 0,
+                                opponent_fouls: 0,
                                 rounds: vec![],
                                 status: "playing".to_string(),
                             };
@@ -599,32 +615,74 @@ async fn handle_ws(mut socket: WebSocket, code: String, state: AppState) {
                     }
                     "match_round_submit" => {
                         let match_id = parsed.get("match_id").and_then(|id| id.as_str()).unwrap_or("").to_string();
-                        let winner_id = parsed.get("winner_id").and_then(|id| id.as_str()).unwrap_or("").to_string();
-                        let finish_type = parsed.get("finish_type").and_then(|f| f.as_str()).unwrap_or("").to_string();
+                        let winner_id = parsed.get("winner_id").and_then(|id| id.as_str()).map(|id| id.to_string());
+                        let finish_type = parsed.get("finish_type").and_then(|f| f.as_str()).map(|f| f.to_string());
+                        let round_type = parsed.get("round_type").and_then(|rt| rt.as_str()).unwrap_or("finish").to_string();
+                        let foul_blader_id = parsed.get("foul_blader_id").and_then(|f| f.as_str()).map(|f| f.to_string());
 
                         let mut live_matches = state.ws_state.live_matches.lock().await;
                         if let Some(m) = live_matches.get_mut(&match_id) {
-                            let pts = match finish_type.as_str() {
-                                "spin" => 1,
-                                "over" => 2,
-                                "burst" => 2,
-                                "xtreme" => 3,
-                                _ => 1,
-                            };
+                            let mut b1_pts = 0;
+                            let mut b2_pts = 0;
+                            let mut round_winner_id = None;
+                            let mut round_finish_type = None;
 
-                            let is_challenger = winner_id == m.challenger_id;
-                            if is_challenger {
-                                m.challenger_points += pts;
-                                m.challenger_wins += 1;
+                            if round_type == "draw" {
+                                round_finish_type = Some("draw".to_string());
+                            } else if round_type == "foul" {
+                                if let Some(ref f_id) = foul_blader_id {
+                                    round_finish_type = Some("foul".to_string());
+                                    if f_id == &m.challenger_id {
+                                        m.challenger_fouls += 1;
+                                        if m.challenger_fouls % 2 == 0 {
+                                            m.opponent_points += 1;
+                                            b2_pts = 1;
+                                        }
+                                    } else {
+                                        m.opponent_fouls += 1;
+                                        if m.opponent_fouls % 2 == 0 {
+                                            m.challenger_points += 1;
+                                            b1_pts = 1;
+                                        }
+                                    }
+                                }
                             } else {
-                                m.opponent_points += pts;
-                                m.opponent_wins += 1;
+                                if let Some(ref w_id) = winner_id {
+                                    if !w_id.is_empty() {
+                                        round_winner_id = Some(w_id.clone());
+                                        let f_type = finish_type.clone().unwrap_or_else(|| "spin".to_string());
+                                        let pts = match f_type.as_str() {
+                                            "spin" => 1,
+                                            "over" => 2,
+                                            "burst" => 2,
+                                            "xtreme" => 3,
+                                            _ => 1,
+                                        };
+                                        round_finish_type = Some(f_type);
+
+                                        let is_challenger = w_id == &m.challenger_id;
+                                        if is_challenger {
+                                            m.challenger_points += pts;
+                                            m.challenger_wins += 1;
+                                            b1_pts = pts;
+                                        } else {
+                                            m.opponent_points += pts;
+                                            m.opponent_wins += 1;
+                                            b2_pts = pts;
+                                        }
+                                    }
+                                }
                             }
 
+                            let round_num = (m.rounds.len() + 1) as i32;
                             m.rounds.push(LiveMatchRound {
-                                winner_id: winner_id.clone(),
-                                finish_type: finish_type.clone(),
-                                points: pts,
+                                round_num,
+                                round_type: round_type.clone(),
+                                winner_id: round_winner_id,
+                                finish_type: round_finish_type,
+                                foul_blader_id,
+                                b1_points: b1_pts,
+                                b2_points: b2_pts,
                             });
 
                             let is_completed = if m.format == "1on1" {
@@ -650,7 +708,37 @@ async fn handle_ws(mut socket: WebSocket, code: String, state: AppState) {
                                     }
                                 };
 
-                                if db.record_versus_battle(final_winner, final_loser, winner_pts).is_ok() {
+                                let db_rounds: Vec<crate::db::BattleRound> = m.rounds.iter().map(|r| {
+                                    crate::db::BattleRound {
+                                        round_num: r.round_num,
+                                        round_type: r.round_type.clone(),
+                                        winner_id: r.winner_id.clone(),
+                                        finish_type: r.finish_type.clone(),
+                                        foul_blader_id: r.foul_blader_id.clone(),
+                                        b1_points: r.b1_points,
+                                        b2_points: r.b2_points,
+                                        bey1: None,
+                                        bey2: None,
+                                    }
+                                }).collect();
+
+                                let record = crate::db::BattleRecord {
+                                    id: m.id.clone(),
+                                    battle_type: "challenge".to_string(),
+                                    associated_id: None,
+                                    associated_name: None,
+                                    blader1_id: m.challenger_id.clone(),
+                                    blader1_name: m.challenger_name.clone(),
+                                    blader2_id: m.opponent_id.clone(),
+                                    blader2_name: m.opponent_name.clone(),
+                                    winner_id: Some(final_winner.to_string()),
+                                    blader1_points: m.challenger_points,
+                                    blader2_points: m.opponent_points,
+                                    rounds: db_rounds,
+                                    created_at: Utc::now().to_rfc3339(),
+                                };
+
+                                if db.record_battle(&record).is_ok() {
                                     let players = state.ws_state.lobby_players.lock().await;
                                     if let Some(p1) = players.get(&m.challenger_id) {
                                         let _ = p1.tx.send(json!({
@@ -784,6 +872,242 @@ async fn get_matches_api(
     } else {
         (axum::http::StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response()
     }
+}
+
+// ─── Axum Handlers for Remote Mode ──────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct CreateBladerRequest {
+    name: String,
+    avatarColor: String,
+    avatarImage: Option<String>,
+    password: Option<String>,
+}
+
+async fn create_blader_api(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateBladerRequest>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.create_blader(&payload.name, &payload.avatarColor, payload.avatarImage.as_deref(), payload.password.as_deref()) {
+        Ok(b) => (axum::http::StatusCode::CREATED, Json(b)).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdateBladerRequest {
+    name: String,
+    avatarColor: String,
+    avatarImage: Option<String>,
+    beys: Vec<String>,
+    password: Option<String>,
+}
+
+async fn update_blader_api(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(payload): Json<UpdateBladerRequest>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.update_blader(&id, &payload.name, &payload.avatarColor, payload.avatarImage.as_deref(), &payload.beys, payload.password.as_deref()) {
+        Ok(_) => axum::http::StatusCode::OK.into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+async fn delete_blader_api(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.delete_blader(&id) {
+        Ok(_) => axum::http::StatusCode::OK.into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct CreateTournamentApiRequest {
+    args: crate::commands::CreateTournamentArgs,
+}
+
+async fn create_tournament_api(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateTournamentApiRequest>,
+) -> impl IntoResponse {
+    let join_code = generate_code();
+    let db = state.db.lock().await;
+    match db.create_tournament(
+        &payload.args.name, &payload.args.format, &payload.args.arena,
+        payload.args.point_threshold, &join_code, &payload.args.blader_ids
+    ) {
+        Ok(t) => (axum::http::StatusCode::CREATED, Json(t)).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+async fn get_tournament_details_api(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    let tournament = db.get_tournament(&id).unwrap_or(None);
+    let bladers = db.get_bladers().unwrap_or_default();
+    let matches = db.get_matches_for_tournament(&id).unwrap_or_default();
+
+    if let Some(t) = tournament {
+        let t_bladers: Vec<serde_json::Value> = t.blader_ids.iter()
+            .filter_map(|bid| bladers.iter().find(|b| &b.id == bid))
+            .map(|b| json!(b))
+            .collect();
+        (axum::http::StatusCode::OK, Json(json!({
+            "tournament": t,
+            "bladers": t_bladers,
+            "matches": matches
+        }))).into_response()
+    } else {
+        (axum::http::StatusCode::NOT_FOUND, Json(json!({ "error": "Tournament not found" }))).into_response()
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdateTournamentApiRequest {
+    args: crate::commands::UpdateTournamentArgs,
+}
+
+async fn update_tournament_api(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(payload): Json<UpdateTournamentApiRequest>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.update_tournament(&id, &payload.args.name, &payload.args.arena, payload.args.point_threshold, &payload.args.format) {
+        Ok(_) => axum::http::StatusCode::OK.into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+async fn delete_tournament_api(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.delete_tournament(&id) {
+        Ok(_) => axum::http::StatusCode::OK.into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+async fn reset_tournament_api(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.reset_tournament(&id) {
+        Ok(_) => axum::http::StatusCode::OK.into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct AddMatchResultApiRequest {
+    args: crate::commands::MatchResultArgs,
+}
+
+async fn add_match_result_api(
+    State(state): State<AppState>,
+    Path(_id): Path<String>,
+    Json(payload): Json<AddMatchResultApiRequest>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.add_match_result(
+        &payload.args.match_id, &payload.args.winner_id,
+        payload.args.blader1_points, payload.args.blader2_points,
+        &payload.args.finish_type, payload.args.bey1.as_deref(), payload.args.bey2.as_deref(),
+        payload.args.rounds.clone()
+    ) {
+        Ok(_) => {
+            state.ws_state.broadcast(&json!({
+                "type": "match_update",
+                "match_id": payload.args.match_id,
+                "winner_id": payload.args.winner_id,
+                "finish_type": payload.args.finish_type
+            }).to_string());
+            axum::http::StatusCode::OK.into_response()
+        }
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct RecordVersusBattleApiRequest {
+    args: crate::commands::VersusResultArgs,
+}
+
+async fn record_versus_battle_api(
+    State(state): State<AppState>,
+    Json(payload): Json<RecordVersusBattleApiRequest>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.record_versus_battle(&payload.args.blader1_id, &payload.args.blader2_id, &payload.args.winner_id, payload.args.rounds.clone()) {
+        Ok(_) => axum::http::StatusCode::OK.into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+async fn get_blader_history_api(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.get_battle_history_for_blader(&id) {
+        Ok(h) => (axum::http::StatusCode::OK, Json(h)).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct CreateCustomArenaApiRequest {
+    args: crate::commands::CreateCustomArenaArgs,
+}
+
+async fn create_custom_arena_api(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateCustomArenaApiRequest>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.create_custom_arena(
+        &payload.args.name,
+        &payload.args.description,
+        payload.args.max_players,
+        payload.args.has_xtreme_line,
+        &payload.args.tags,
+        &payload.args.color,
+    ) {
+        Ok(a) => (axum::http::StatusCode::CREATED, Json(a)).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+async fn delete_custom_arena_api(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.delete_custom_arena(&id) {
+        Ok(_) => axum::http::StatusCode::OK.into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+fn generate_code() -> String {
+    use rand::Rng;
+    const CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let mut rng = rand::thread_rng();
+    let part1: String = (0..3).map(|_| CHARS[rng.gen_range(0..CHARS.len())] as char).collect();
+    let part2: String = (0..3).map(|_| CHARS[rng.gen_range(0..CHARS.len())] as char).collect();
+    format!("{}-{}", part1, part2)
 }
 
 fn mobile_html(code: Option<&str>) -> String {
@@ -1334,6 +1658,7 @@ fn mobile_lobby_html() -> String {
     <div class="tabs">
       <div class="tab active" onclick="showTab('players')">Online</div>
       <div class="tab" onclick="showTab('tournaments')">Tornei</div>
+      <div class="tab" onclick="showTab('beys')">Beys</div>
       <div class="tab" onclick="showTab('profile')">Profilo</div>
       <div class="tab" onclick="showTab('history')">Attività</div>
     </div>
@@ -1358,31 +1683,8 @@ fn mobile_lobby_html() -> String {
       </div>
     </div>
 
-    <!-- Profile Tab -->
-    <div id="profileTab" class="tab-content">
-      <!-- Statistiche Personali -->
-      <div class="card">
-        <h2>Statistiche Blader</h2>
-        <div class="stats-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:8px">
-          <div class="stat-box" style="background:var(--surface-2);padding:12px;border-radius:10px;text-align:center;border:1px solid rgba(255,255,255,0.03)">
-            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-family:'Orbitron'">Vittorie</div>
-            <div id="profWins" style="font-size:1.8rem;font-weight:bold;color:var(--success);font-family:'Orbitron';margin-top:4px">0</div>
-          </div>
-          <div class="stat-box" style="background:var(--surface-2);padding:12px;border-radius:10px;text-align:center;border:1px solid rgba(255,255,255,0.03)">
-            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-family:'Orbitron'">Sconfitte</div>
-            <div id="profLosses" style="font-size:1.8rem;font-weight:bold;color:var(--danger);font-family:'Orbitron';margin-top:4px">0</div>
-          </div>
-          <div class="stat-box" style="background:var(--surface-2);padding:12px;border-radius:10px;text-align:center;border:1px solid rgba(255,255,255,0.03)">
-            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-family:'Orbitron'">Win Rate</div>
-            <div id="profWinRate" style="font-size:1.8rem;font-weight:bold;color:var(--accent);font-family:'Orbitron';margin-top:4px">0%</div>
-          </div>
-          <div class="stat-box" style="background:var(--surface-2);padding:12px;border-radius:10px;text-align:center;border:1px solid rgba(255,255,255,0.03)">
-            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-family:'Orbitron'">Punti Totali</div>
-            <div id="profPoints" style="font-size:1.8rem;font-weight:bold;color:var(--primary);font-family:'Orbitron';margin-top:4px">0</div>
-          </div>
-        </div>
-      </div>
-
+    <!-- Beys Tab -->
+    <div id="beysTab" class="tab-content">
       <!-- Il Mio Deck -->
       <div class="card">
         <h2>Il Mio Deck (Max 3 Bey)</h2>
@@ -1423,6 +1725,51 @@ fn mobile_lobby_html() -> String {
         </div>
         <div id="customBeysList" style="display:flex;flex-direction:column;gap:10px">
           <p style="text-align:center;color:var(--muted);font-size:0.85rem">Nessun Bey custom creato.</p>
+        </div>
+      </div>
+
+      <!-- Beyblade Standard -->
+      <div class="card">
+        <h2>Beyblade Standard</h2>
+        <div class="form-group" style="position:relative;margin-bottom:12px">
+          <input class="form-input" id="searchStandardBeysInput" placeholder="Cerca Beyblade..." oninput="filterStandardBeysMobile()">
+        </div>
+        <div id="standardBeysListMobile" style="display:flex;flex-direction:column;gap:10px;max-height:300px;overflow-y:auto">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Profile Tab -->
+    <div id="profileTab" class="tab-content">
+      <!-- Statistiche Personali -->
+      <div class="card">
+        <h2>Statistiche Blader</h2>
+        <div class="stats-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:8px">
+          <div class="stat-box" style="background:var(--surface-2);padding:12px;border-radius:10px;text-align:center;border:1px solid rgba(255,255,255,0.03)">
+            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-family:'Orbitron'">Vittorie</div>
+            <div id="profWins" style="font-size:1.8rem;font-weight:bold;color:var(--success);font-family:'Orbitron';margin-top:4px">0</div>
+          </div>
+          <div class="stat-box" style="background:var(--surface-2);padding:12px;border-radius:10px;text-align:center;border:1px solid rgba(255,255,255,0.03)">
+            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-family:'Orbitron'">Sconfitte</div>
+            <div id="profLosses" style="font-size:1.8rem;font-weight:bold;color:var(--danger);font-family:'Orbitron';margin-top:4px">0</div>
+          </div>
+          <div class="stat-box" style="background:var(--surface-2);padding:12px;border-radius:10px;text-align:center;border:1px solid rgba(255,255,255,0.03)">
+            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-family:'Orbitron'">Win Rate</div>
+            <div id="profWinRate" style="font-size:1.8rem;font-weight:bold;color:var(--accent);font-family:'Orbitron';margin-top:4px">0%</div>
+          </div>
+          <div class="stat-box" style="background:var(--surface-2);padding:12px;border-radius:10px;text-align:center;border:1px solid rgba(255,255,255,0.03)">
+            <div style="font-size:0.75rem;color:var(--muted);text-transform:uppercase;font-family:'Orbitron'">Punti Totali</div>
+            <div id="profPoints" style="font-size:1.8rem;font-weight:bold;color:var(--primary);font-family:'Orbitron';margin-top:4px">0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cronologia Battaglie -->
+      <div class="card">
+        <h2>Cronologia Battaglie</h2>
+        <div id="profileMatchesHistory" style="display:flex;flex-direction:column;gap:10px;margin-top:12px;max-height:300px;overflow-y:auto">
+          <p style="text-align:center;color:var(--muted);font-size:0.85rem">Nessuna battaglia registrata.</p>
         </div>
       </div>
     </div>
@@ -1532,14 +1879,17 @@ fn mobile_lobby_html() -> String {
     <h2 style="margin-bottom:16px">Registra Round</h2>
     
     <div class="form-group">
-      <label class="form-label">Vincitore Round</label>
-      <div style="display:flex;gap:8px;margin-bottom:12px">
-        <button class="btn btn-secondary flex-1" id="lmWinBtn1" onclick="selectRoundWinner(1)">Tu</button>
-        <button class="btn btn-secondary flex-1" id="lmWinBtn2" onclick="selectRoundWinner(2)">Avversario</button>
+      <label class="form-label">Esito Round</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        <button class="btn btn-secondary" id="lmWinBtn1" onclick="selectRoundOutcome('winner1')">Vittoria Tu</button>
+        <button class="btn btn-secondary" id="lmWinBtn2" onclick="selectRoundOutcome('winner2')">Vittoria Avv.</button>
+        <button class="btn btn-secondary" id="lmWinDraw" style="grid-column:span 2" onclick="selectRoundOutcome('draw')">Pareggio</button>
+        <button class="btn btn-secondary" id="lmWinFoul1" onclick="selectRoundOutcome('foul1')">Fallo Tuo</button>
+        <button class="btn btn-secondary" id="lmWinFoul2" onclick="selectRoundOutcome('foul2')">Fallo Avv.</button>
       </div>
     </div>
 
-    <div class="form-group">
+    <div class="form-group" id="lmFinishGroup">
       <label class="form-label">Tipo di Finish</label>
       <div class="finish-types">
         <button class="finish-type-btn selected spin" id="lmFinishSpin" onclick="selectLmFinish('spin')">Spin Finish (+1)</button>
@@ -2493,48 +2843,115 @@ function renderLiveMatchScore() {
       'spin': 'Spin Finish',
       'over': 'Over Finish',
       'burst': 'Burst Finish',
-      'xtreme': 'Xtreme Finish'
+      'xtreme': 'Xtreme Finish',
+      'draw': 'Pareggio',
+      'foul': 'Fallo'
+    };
+    const finishColors = {
+      'spin': 'var(--primary)',
+      'over': 'var(--secondary)',
+      'burst': 'var(--danger)',
+      'xtreme': 'var(--accent)',
+      'draw': '#888888',
+      'foul': '#ffaa00'
     };
     
     historyContainer.innerHTML = currentLiveMatch.rounds.map((r, i) => {
-      const winnerName = r.winner_id === currentLiveMatch.challenger_id 
-        ? currentLiveMatch.challenger_name 
-        : currentLiveMatch.opponent_name;
+      let desc = '';
+      let pointsText = '';
+      let color = 'var(--primary)';
+
+      if (r.round_type === 'draw') {
+        desc = 'Pareggio';
+        color = finishColors['draw'];
+        pointsText = '+0 pt';
+      } else if (r.round_type === 'foul') {
+        const foulBlader = r.foul_blader_id === currentLiveMatch.challenger_id
+          ? currentLiveMatch.challenger_name
+          : currentLiveMatch.opponent_name;
+        desc = `Fallo a ${foulBlader}`;
+        color = finishColors['foul'];
+        const pts = r.foul_blader_id === currentLiveMatch.challenger_id ? r.b2_points : r.b1_points;
+        pointsText = pts > 0 ? `+1 pt all'avversario` : '+0 pt';
+      } else {
+        const winnerName = r.winner_id === currentLiveMatch.challenger_id
+          ? currentLiveMatch.challenger_name
+          : currentLiveMatch.opponent_name;
+        desc = `${winnerName} (${finishLabels[r.finish_type] || r.finish_type})`;
+        color = finishColors[r.finish_type] || 'var(--primary)';
+        const pts = r.winner_id === currentLiveMatch.challenger_id ? r.b1_points : r.b2_points;
+        pointsText = `+${pts} pt`;
+      }
         
       return `<div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface-3);padding:8px 12px;border-radius:8px;font-size:0.8rem">
         <span style="color:var(--muted);font-family:'Orbitron'">Round ${i+1}</span>
-        <span style="font-weight:700;color:var(--accent)">${winnerName}</span>
-        <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;background:rgba(0,212,255,0.1);color:var(--primary)">
-          ${finishLabels[r.finish_type] || r.finish_type} (+${r.points} pt)
+        <span style="font-weight:700;color:var(--text);flex:1;margin-left:10px">${desc}</span>
+        <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;background:${color}22;color:${color}">
+          ${pointsText}
         </span>
       </div>`;
     }).join('');
   }
 }
 
-function selectRoundWinner(playerIndex) {
+let lmSelectedOutcome = 'finish';
+let lmSelectedFoulBladerId = null;
+
+function selectRoundOutcome(outcome) {
   if (!currentLiveMatch) return;
   
   const p1 = document.getElementById('lmWinBtn1');
   const p2 = document.getElementById('lmWinBtn2');
+  const drawBtn = document.getElementById('lmWinDraw');
+  const foul1Btn = document.getElementById('lmWinFoul1');
+  const foul2Btn = document.getElementById('lmWinFoul2');
+  const finishGroup = document.getElementById('lmFinishGroup');
   
-  p1.classList.remove('selected');
-  p1.style.borderColor = '';
-  p1.style.background = '';
-  p2.classList.remove('selected');
-  p2.style.borderColor = '';
-  p2.style.background = '';
+  const buttons = [p1, p2, drawBtn, foul1Btn, foul2Btn];
+  buttons.forEach(btn => {
+    if (btn) {
+      btn.classList.remove('selected');
+      btn.style.borderColor = '';
+      btn.style.background = '';
+    }
+  });
   
-  if (playerIndex === 1) {
+  lmSelectedWinnerId = null;
+  lmSelectedFoulBladerId = null;
+  lmSelectedOutcome = 'finish';
+  
+  if (outcome === 'winner1') {
     p1.classList.add('selected');
     p1.style.borderColor = 'var(--primary)';
     p1.style.background = 'rgba(0,212,255,0.1)';
     lmSelectedWinnerId = currentLiveMatch.challenger_id;
-  } else {
+    if (finishGroup) finishGroup.style.display = 'block';
+  } else if (outcome === 'winner2') {
     p2.classList.add('selected');
     p2.style.borderColor = 'var(--danger)';
     p2.style.background = 'rgba(255,68,68,0.1)';
     lmSelectedWinnerId = currentLiveMatch.opponent_id;
+    if (finishGroup) finishGroup.style.display = 'block';
+  } else if (outcome === 'draw') {
+    drawBtn.classList.add('selected');
+    drawBtn.style.borderColor = '#888888';
+    drawBtn.style.background = 'rgba(136,136,136,0.1)';
+    lmSelectedOutcome = 'draw';
+    if (finishGroup) finishGroup.style.display = 'none';
+  } else if (outcome === 'foul1') {
+    foul1Btn.classList.add('selected');
+    foul1Btn.style.borderColor = '#ffaa00';
+    foul1Btn.style.background = 'rgba(255,170,0,0.1)';
+    lmSelectedOutcome = 'foul';
+    lmSelectedFoulBladerId = currentLiveMatch.challenger_id;
+    if (finishGroup) finishGroup.style.display = 'none';
+  } else if (outcome === 'foul2') {
+    foul2Btn.classList.add('selected');
+    foul2Btn.style.borderColor = '#ffaa00';
+    foul2Btn.style.background = 'rgba(255,170,0,0.1)';
+    lmSelectedOutcome = 'foul';
+    lmSelectedFoulBladerId = currentLiveMatch.opponent_id;
+    if (finishGroup) finishGroup.style.display = 'none';
   }
 }
 
@@ -2550,7 +2967,7 @@ function selectLmFinish(type) {
 
 function submitRound() {
   if (!currentLiveMatch) return;
-  if (!lmSelectedWinnerId) {
+  if (lmSelectedOutcome === 'finish' && !lmSelectedWinnerId) {
     showToast('Seleziona il vincitore del round!', 'error');
     return;
   }
@@ -2560,17 +2977,13 @@ function submitRound() {
       type: "match_round_submit",
       match_id: currentLiveMatch.id,
       winner_id: lmSelectedWinnerId,
-      finish_type: lmSelectedFinish
+      finish_type: lmSelectedOutcome === 'finish' ? lmSelectedFinish : null,
+      round_type: lmSelectedOutcome,
+      foul_blader_id: lmSelectedFoulBladerId
     }));
     
-    // Reset selected winner in UI
-    lmSelectedWinnerId = null;
-    document.getElementById('lmWinBtn1').classList.remove('selected');
-    document.getElementById('lmWinBtn1').style.borderColor = '';
-    document.getElementById('lmWinBtn1').style.background = '';
-    document.getElementById('lmWinBtn2').classList.remove('selected');
-    document.getElementById('lmWinBtn2').style.borderColor = '';
-    document.getElementById('lmWinBtn2').style.background = '';
+    // Reset selection in UI
+    selectRoundOutcome(null);
   } else {
     showToast('Connessione persa, riprova.', 'error');
   }
@@ -3048,6 +3461,106 @@ async function loadProfileTab() {
   await loadCustomBeys();
   renderCustomBeysList();
   updateDeckSlotUI();
+  await loadProfileBattleHistory();
+}
+
+async function loadProfileBattleHistory() {
+  const container = document.getElementById('profileMatchesHistory');
+  if (!container) return;
+  
+  try {
+    const response = await fetch(`/api/blader/${currentUser.id}/history`);
+    if (!response.ok) throw new Error("Errore durante il recupero dello storico");
+    const history = await response.json();
+    
+    if (history.length === 0) {
+      container.innerHTML = '<p style="text-align:center;color:var(--muted);font-size:0.85rem">Nessuna battaglia registrata.</p>';
+      return;
+    }
+    
+    const finishLabels = {
+      'spin': 'Spin Finish',
+      'over': 'Over Finish',
+      'burst': 'Burst Finish',
+      'xtreme': 'Xtreme Finish',
+      'draw': 'Pareggio',
+      'foul': 'Fallo'
+    };
+    
+    container.innerHTML = history.map(match => {
+      const isWinner = match.winner_id === currentUser.id;
+      const opponentName = match.blader1_id === currentUser.id ? match.blader2_name : match.blader1_name;
+      const myScore = match.blader1_id === currentUser.id ? match.blader1_points : match.blader2_points;
+      const oppScore = match.blader1_id === currentUser.id ? match.blader2_points : match.blader1_points;
+      
+      const outcomeText = match.winner_id ? (isWinner ? 'VITTORIA' : 'SCONFITTA') : 'PAREGGIO';
+      const outcomeClass = match.winner_id ? (isWinner ? 'success' : 'danger') : 'muted';
+      
+      let typeLabel = 'Sfida Versus';
+      if (match.battle_type === 'challenge') {
+        typeLabel = 'Sfida Lobby';
+      } else if (match.battle_type === 'tournament') {
+        typeLabel = `Torneo: ${match.associated_name || 'Torneo'}`;
+      }
+
+      const roundsHtml = match.rounds.map((r, i) => {
+        let rDesc = '';
+        let rPts = '';
+        if (r.round_type === 'draw') {
+          rDesc = 'Pareggio';
+          rPts = '+0 pt';
+        } else if (r.round_type === 'foul') {
+          const foulBlader = r.foul_blader_id === match.blader1_id ? match.blader1_name : match.blader2_name;
+          rDesc = `Fallo a ${foulBlader}`;
+          const pts = r.foul_blader_id === match.blader1_id ? r.b2_points : r.b1_points;
+          rPts = pts > 0 ? `+1 pt` : '+0 pt';
+        } else {
+          const wName = r.winner_id === match.blader1_id ? match.blader1_name : match.blader2_name;
+          const fLbl = finishLabels[r.finish_type] || r.finish_type || 'Finish';
+          rDesc = `${wName} (${fLbl})`;
+          const pts = r.winner_id === match.blader1_id ? r.b1_points : r.b2_points;
+          rPts = `+${pts} pt`;
+        }
+        return `<div style="display:flex;justify-content:space-between;padding:4px 8px;background:var(--surface-3);border-radius:4px;font-size:0.75rem;margin-bottom:4px">
+          <span style="color:var(--muted)">R${i+1}</span>
+          <span style="font-weight:600">${rDesc}</span>
+          <span style="color:var(--primary)">${rPts}</span>
+        </div>`;
+      }).join('');
+
+      const detailId = `match-detail-${match.id}`;
+      return `
+        <div class="player-item" style="flex-direction:column;align-items:stretch;gap:8px" onclick="toggleMatchDetail('${detailId}')">
+          <div style="display:flex;justify-content:space-between;align-items:center;width:100%">
+            <div>
+              <div style="font-size:0.75rem;color:var(--muted)">${typeLabel}</div>
+              <div class="player-name">vs ${opponentName}</div>
+            </div>
+            <div style="text-align:right">
+              <span class="t-status ${outcomeClass}" style="padding:2px 6px;font-size:0.65rem">${outcomeText}</span>
+              <div style="font-family:'Orbitron';font-weight:bold;font-size:0.95rem;margin-top:2px;color:var(--text)">
+                ${myScore} - ${oppScore}
+              </div>
+            </div>
+          </div>
+          <div id="${detailId}" style="display:none;border-top:1px solid rgba(255,255,255,0.05);padding-top:8px;margin-top:4px;width:100%">
+            <div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;font-family:'Orbitron';letter-spacing:1px;margin-bottom:6px">Dettaglio Round</div>
+            ${roundsHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error(err);
+    container.innerHTML = '<p style="text-align:center;color:var(--danger);font-size:0.85rem">Errore nel caricamento.</p>';
+  }
+}
+
+function toggleMatchDetail(id) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
 }
 
 async function startQrScanner(forSlot = true) {

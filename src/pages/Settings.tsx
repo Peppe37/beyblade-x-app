@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useSettings } from '../store';
 import { t } from '../types';
-import { Save, Globe, Wifi, QrCode, Copy, Check } from 'lucide-react';
+import { Save, Globe, Wifi, QrCode, Copy, Check, Database } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import { getBackendMode, getRemoteUrl } from '../services/api';
 
 export default function Settings() {
   const { lang, setLang, localIp } = useSettings();
@@ -11,8 +12,10 @@ export default function Settings() {
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<'home' | 'lobby'>('home');
 
-  const homeUrl = `http://${localIp || '127.0.0.1'}:7878/`;
-  const lobbyUrl = `http://${localIp || '127.0.0.1'}:7878/lobby`;
+  const backendMode = getBackendMode();
+  const remoteUrl = getRemoteUrl();
+  const homeUrl = backendMode === 'remote' ? `${remoteUrl.replace(/\/$/, '')}/` : `http://${localIp || '127.0.0.1'}:7878/`;
+  const lobbyUrl = backendMode === 'remote' ? `${remoteUrl.replace(/\/$/, '')}/lobby` : `http://${localIp || '127.0.0.1'}:7878/lobby`;
   const currentUrl = activeTab === 'home' ? homeUrl : lobbyUrl;
 
   const handleSave = () => {
@@ -57,6 +60,39 @@ export default function Settings() {
                 English
               </button>
             </div>
+          </div>
+
+          <div className="card animate-fade-in">
+            <div className="flex items-center gap-sm mb-md">
+              <Database size={20} color="var(--accent)" />
+              <h2 style={{ fontFamily: 'Orbitron', fontSize: '1rem', marginBottom: 0 }}>
+                {lang === 'it' ? 'Configurazione Backend' : 'Backend Configuration'}
+              </h2>
+            </div>
+            
+            <div style={{ background: 'var(--surface-2)', padding: '12px 16px', borderRadius: 8, marginBottom: 16 }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+                {lang === 'it' ? 'Stato Connessione' : 'Connection Status'}
+              </div>
+              <div style={{ fontFamily: 'Orbitron', color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase' }}>
+                {lang === 'it' ? 'Connesso a Server' : 'Connected to Server'}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4, fontFamily: 'Orbitron', wordBreak: 'break-all' }}>
+                {remoteUrl}
+              </div>
+            </div>
+            
+            <button 
+              className="btn btn-secondary animate-pulse" 
+              style={{ width: '100%', borderColor: 'var(--danger)', color: 'var(--danger)', background: 'transparent' }}
+              onClick={() => {
+                localStorage.removeItem('remote_backend_url');
+                localStorage.removeItem('remember_url');
+                window.location.reload();
+              }}
+            >
+              {lang === 'it' ? 'Disconnetti / Cambia Indirizzo' : 'Disconnect / Switch Address'}
+            </button>
           </div>
 
           <div className="card">

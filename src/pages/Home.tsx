@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Trophy, Users, Disc3, Zap, Plus, TrendingUp, Shield, Target, History } from 'lucide-react';
 import { useBladers, useTournaments, useSettings } from '../store';
 import { t } from '../types';
-import { invoke } from '@tauri-apps/api/core';
+import { api } from '../services/api';
 
 export default function Home() {
   const { bladers, fetchBladers } = useBladers();
@@ -17,7 +17,7 @@ export default function Home() {
   useEffect(() => {
     fetchBladers();
     fetchTournaments();
-    invoke('get_activities')
+    api.getActivities()
       .then((res: any) => setActivities(res))
       .catch((err) => console.error(err));
   }, []);
