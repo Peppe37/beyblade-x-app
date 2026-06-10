@@ -4192,59 +4192,59 @@ r##"<!DOCTYPE html>
     <h2 id="formTitle">Aggiungi Blade</h2>
     <form id="partForm" onsubmit="submitForm(event)">
       <div class="grid">
-        <!-- Name: select for blade/assist/lock/over -->
-        <div class="field" id="fNameSel">
+        <!-- Name: unified free-text + datalist for all types -->
+        <div class="field" id="fName">
           <label>Nome</label>
-          <select id="nameSelect"></select>
-        </div>
-        <!-- Name: text for bit -->
-        <div class="field" id="fNameTxt" style="display:none">
-          <label>Nome / Lettere</label>
-          <input type="text" id="nameInput" placeholder="es. F, LF, Q, L, HN" autocomplete="off">
+          <input type="text" id="nameInput" list="dl-name" placeholder="Cerca o inserisci..." autocomplete="off">
+          <datalist id="dl-name"></datalist>
         </div>
         <!-- Ratchet specific -->
         <div class="field" id="fProt" style="display:none">
           <label>Sporgenze</label>
-          <select id="protSel">
+          <input type="text" id="protSel" list="dl-prot" placeholder="es. 3" autocomplete="off">
+          <datalist id="dl-prot">
             <option>1</option><option>2</option><option>3</option><option>4</option>
             <option>5</option><option>6</option><option>7</option><option>8</option>
             <option>9</option><option>10</option><option>12</option>
-          </select>
+          </datalist>
         </div>
         <div class="field" id="fHgt" style="display:none">
           <label>Altezza</label>
-          <select id="hgtSel">
-            <option value="45">45</option><option value="50">50</option>
-            <option value="55">55</option><option value="60" selected>60</option>
-            <option value="65">65</option><option value="70">70</option>
-            <option value="75">75</option><option value="80">80</option>
-            <option value="85">85</option><option value="90">90</option>
-          </select>
+          <input type="text" id="hgtSel" list="dl-hgt" placeholder="es. 60" autocomplete="off">
+          <datalist id="dl-hgt">
+            <option>45</option><option>50</option><option>55</option><option>60</option>
+            <option>65</option><option>70</option><option>75</option><option>80</option>
+            <option>85</option><option>90</option>
+          </datalist>
         </div>
         <!-- Common fields -->
         <div class="field">
           <label>Seriale</label>
-          <select id="serialSel"></select>
+          <input type="text" id="serialSel" list="dl-serial" placeholder="es. BX-01" autocomplete="off">
+          <datalist id="dl-serial"></datalist>
         </div>
         <div class="field">
           <label>Pack</label>
-          <select id="packSel"></select>
+          <input type="text" id="packSel" list="dl-pack" placeholder="es. Starter Pack" autocomplete="off">
+          <datalist id="dl-pack"></datalist>
         </div>
         <div class="field">
           <label>Brand</label>
-          <select id="brandSel">
-            <option value="takara_tomy">Takara Tomy</option>
-            <option value="hasbro">Hasbro</option>
-          </select>
+          <input type="text" id="brandSel" list="dl-brand" placeholder="Takara Tomy" autocomplete="off">
+          <datalist id="dl-brand">
+            <option>Takara Tomy</option>
+            <option>Hasbro</option>
+          </datalist>
         </div>
         <div class="field">
           <label>Serie</label>
-          <select id="seriesSel" onchange="updateSerials()">
-            <option value="bx">BX — Beyblade X</option>
-            <option value="ux">UX — Ultimate X</option>
-            <option value="cx">CX — Combo X</option>
-            <option value="cx_new">CX New</option>
-          </select>
+          <input type="text" id="seriesSel" list="dl-series" placeholder="es. BX" autocomplete="off" oninput="updateSerials()">
+          <datalist id="dl-series">
+            <option>BX</option>
+            <option>UX</option>
+            <option>CX</option>
+            <option>CX New</option>
+          </datalist>
         </div>
         <div class="field">
           <label>Colore</label>
@@ -4351,18 +4351,35 @@ function switchTab(type) {
   loadParts();
 }
 
+function seriesKey(s) {
+  const m = {'bx':'bx','ux':'ux','cx':'cx','cx new':'cx_new','cx_new':'cx_new'};
+  return m[(s||'').toLowerCase().trim()] || 'bx';
+}
+
+function populateDl(id, values) {
+  const dl = document.getElementById(id);
+  if (!dl) return;
+  const existing = new Set(Array.from(dl.options).map(o => o.value));
+  values.forEach(v => {
+    if (v && !existing.has(v)) {
+      const opt = document.createElement('option');
+      opt.value = v;
+      dl.appendChild(opt);
+      existing.add(v);
+    }
+  });
+}
+
 function updateFormFields() {
   const isR = activeType === 'ratchet';
-  const isB = activeType === 'bit';
-  const hasSel = !isR && !isB;
-  document.getElementById('fNameSel').style.display = hasSel ? '' : 'none';
-  document.getElementById('fNameTxt').style.display = isB ? '' : 'none';
+  document.getElementById('fName').style.display = isR ? 'none' : '';
   document.getElementById('fProt').style.display = isR ? '' : 'none';
   document.getElementById('fHgt').style.display = isR ? '' : 'none';
   document.getElementById('ratchetPrev').style.display = isR ? '' : 'none';
-  if (hasSel) {
-    const opts = (NAMES[activeType] || []).map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
-    document.getElementById('nameSelect').innerHTML = opts;
+  if (!isR) {
+    const dl = document.getElementById('dl-name');
+    dl.innerHTML = '';
+    populateDl('dl-name', NAMES[activeType] || []);
   }
   updateSerials();
   updateRatchetName();
@@ -4370,17 +4387,32 @@ function updateFormFields() {
 
 function updateSerials() {
   const s = document.getElementById('seriesSel').value;
-  const list = SERIALS[s] || SERIALS.bx;
-  document.getElementById('serialSel').innerHTML =
-    '<option value="">-- Seleziona --</option>' +
-    list.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  const list = SERIALS[seriesKey(s)] || SERIALS.bx;
+  const dl = document.getElementById('dl-serial');
+  dl.innerHTML = '';
+  populateDl('dl-serial', list);
 }
 
 function updateRatchetName() {
   if (activeType !== 'ratchet') return;
   const p = document.getElementById('protSel').value;
   const h = document.getElementById('hgtSel').value;
-  document.getElementById('ratchetName').textContent = p + '-' + h;
+  if (p && h) document.getElementById('ratchetName').textContent = p + '-' + h;
+}
+
+function updateDatalistsFromParts(data) {
+  populateDl('dl-name', [...new Set(data.map(p => p.name).filter(Boolean))]);
+  populateDl('dl-serial', [...new Set(data.map(p => p.serial).filter(Boolean))]);
+  populateDl('dl-pack', [...new Set(data.map(p => p.pack).filter(Boolean))]);
+  populateDl('dl-brand', [...new Set(data.map(p => p.brand).filter(Boolean))]);
+  populateDl('dl-series', [...new Set(data.map(p => p.series).filter(Boolean))]);
+}
+
+async function initDatalistsFromAllParts() {
+  try {
+    const r = await fetch('/api/parts');
+    if (r.ok) updateDatalistsFromParts(await r.json());
+  } catch(e) {}
 }
 
 function esc(s) {
@@ -4392,6 +4424,7 @@ async function loadParts() {
   try {
     const r = await fetch('/api/parts?type=' + activeType);
     parts = await r.json();
+    updateDatalistsFromParts(parts);
     renderTable(parts);
   } catch(e) {
     document.getElementById('tableWrap').innerHTML = '<div class="empty">Errore nel caricamento</div>';
@@ -4408,12 +4441,17 @@ function renderTable(data) {
     const color = p.color ? `<span class="swatch" style="background:${esc(p.color)}" title="${esc(p.color)}"></span>` : '—';
     const img = p.image_url ? `<a href="${esc(p.image_url)}" target="_blank" style="color:var(--primary)">🖼</a>` : '—';
     const extra = activeType === 'ratchet' && p.protrusions != null ? `${p.protrusions}-${p.height}` : esc(p.name);
+    const bKey = (p.brand||'').toLowerCase().replace(/\s+/g,'_');
+    const bClass = bKey === 'hasbro' ? 'hasbro' : 'tt';
+    const bLabel = bKey === 'hasbro' ? 'Hasbro' : (bKey === 'takara_tomy' || bKey === 'takara tomy' ? 'Takara Tomy' : esc(p.brand||''));
+    const sKey = seriesKey(p.series);
+    const sLabel = SERIES_LABELS[sKey] || esc(p.series||'');
     return `<tr>
       <td><strong>${extra}</strong></td>
       <td>${esc(p.serial)||'—'}</td>
       <td>${esc(p.pack)||'—'}</td>
-      <td><span class="badge b-${esc(p.brand === 'hasbro' ? 'hasbro' : 'tt')}">${p.brand === 'hasbro' ? 'Hasbro' : 'Takara Tomy'}</span></td>
-      <td><span class="badge b-${esc(p.series)}">${SERIES_LABELS[p.series]||esc(p.series)}</span></td>
+      <td><span class="badge b-${bClass}">${bLabel}</span></td>
+      <td><span class="badge b-${sKey}">${sLabel}</span></td>
       <td>${color}</td>
       <td>${img}</td>
       <td class="td-act">
@@ -4440,16 +4478,14 @@ function editPart(idx) {
     document.getElementById('protSel').value = String(p.protrusions || 3);
     document.getElementById('hgtSel').value = String(p.height || 60);
     updateRatchetName();
-  } else if (activeType === 'bit') {
-    document.getElementById('nameInput').value = p.name;
   } else {
-    document.getElementById('nameSelect').value = p.name;
+    document.getElementById('nameInput').value = p.name;
   }
-  document.getElementById('seriesSel').value = p.series || 'bx';
+  document.getElementById('seriesSel').value = p.series || 'BX';
   updateSerials();
   document.getElementById('serialSel').value = p.serial || '';
   document.getElementById('packSel').value = p.pack || '';
-  document.getElementById('brandSel').value = p.brand || 'takara_tomy';
+  document.getElementById('brandSel').value = p.brand || 'Takara Tomy';
   document.getElementById('colorPick').value = p.color || '#00d4ff';
   document.getElementById('imgUrl').value = p.image_url || '';
   window.scrollTo({top:0,behavior:'smooth'});
@@ -4459,6 +4495,8 @@ function cancelEdit() {
   editingId = null;
   document.getElementById('partForm').reset();
   document.getElementById('colorPick').value = '#00d4ff';
+  document.getElementById('seriesSel').value = 'BX';
+  document.getElementById('brandSel').value = 'Takara Tomy';
   document.getElementById('formTitle').textContent = 'Aggiungi ' + TYPE_LABELS[activeType];
   document.getElementById('submitBtn').textContent = 'Aggiungi';
   document.getElementById('cancelBtn').style.display = 'none';
@@ -4469,21 +4507,19 @@ async function submitForm(e) {
   e.preventDefault();
   let name, protrusions = null, height = null;
   if (activeType === 'ratchet') {
-    protrusions = parseInt(document.getElementById('protSel').value);
-    height = parseInt(document.getElementById('hgtSel').value);
-    name = protrusions + '-' + height;
-  } else if (activeType === 'bit') {
-    name = document.getElementById('nameInput').value.trim();
+    protrusions = parseInt(document.getElementById('protSel').value) || null;
+    height = parseInt(document.getElementById('hgtSel').value) || null;
+    name = (protrusions||'?') + '-' + (height||'?');
   } else {
-    name = document.getElementById('nameSelect').value;
+    name = document.getElementById('nameInput').value.trim();
   }
   if (!name) { toast('Il nome è obbligatorio', false); return; }
   const payload = {
     part_type: activeType, name,
-    serial: document.getElementById('serialSel').value || null,
-    pack: document.getElementById('packSel').value || null,
-    brand: document.getElementById('brandSel').value,
-    series: document.getElementById('seriesSel').value,
+    serial: document.getElementById('serialSel').value.trim() || null,
+    pack: document.getElementById('packSel').value.trim() || null,
+    brand: document.getElementById('brandSel').value.trim() || null,
+    series: document.getElementById('seriesSel').value.trim() || null,
     color: document.getElementById('colorPick').value || null,
     image_url: document.getElementById('imgUrl').value.trim() || null,
     protrusions, height,
@@ -4525,16 +4561,15 @@ function toast(msg, ok) {
   setTimeout(() => el.remove(), 3000);
 }
 
-// Pack dropdown init
 function initPacks() {
-  document.getElementById('packSel').innerHTML =
-    PACKS.map(p => `<option value="${p === '-- Seleziona --' ? '' : esc(p)}">${esc(p)}</option>`).join('');
+  populateDl('dl-pack', PACKS.filter(p => p !== '-- Seleziona --'));
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('protSel').addEventListener('change', updateRatchetName);
-  document.getElementById('hgtSel').addEventListener('change', updateRatchetName);
+  document.getElementById('protSel').addEventListener('input', updateRatchetName);
+  document.getElementById('hgtSel').addEventListener('input', updateRatchetName);
   initPacks();
+  initDatalistsFromAllParts();
   switchTab('blade');
 });
 </script>
