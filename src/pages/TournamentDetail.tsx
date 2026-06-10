@@ -113,7 +113,7 @@ export default function TournamentDetail() {
       bey1: '',
       bey2: '',
     });
-    setMatchPhase('animation');
+    setMatchPhase('match_progress');
   };
 
   const handleAnimationReady = () => {
@@ -928,105 +928,195 @@ export default function TournamentDetail() {
         </Modal>
       )}
 
-      {/* Match Progress Modal */}
-      {battleModal && matchPhase === 'match_progress' && b1 && b2 && (
-        <Modal
-          title={lang === 'it' ? 'Match in Corso' : 'Match in Progress'}
-          onClose={cancelMatch}
-          maxWidth={460}
-          closeOnOverlayClick={false}
-        >
-          <div style={{ textAlign: 'center', marginBottom: 24 }}>
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16 }}>
-              {/* B1 */}
-              <div style={{ flex: 1, textAlign: 'right' }}>
-                <div style={{ fontWeight: 700, fontSize: '1.1rem', color: score1 > score2 ? 'var(--accent)' : 'white' }}>{b1.name}</div>
-                <div style={{ fontFamily: 'Orbitron', fontSize: '2.5rem', fontWeight: 900, color: score1 > score2 ? 'var(--accent)' : 'var(--text-muted)' }}>{score1}</div>
+         {battleModal && matchPhase === 'match_progress' && b1 && b2 && (() => {
+        const b1Fouls = matchRounds.filter(r => r.round_type === 'foul' && r.foul_blader_id === b1Id).length;
+        const b2Fouls = matchRounds.filter(r => r.round_type === 'foul' && r.foul_blader_id === b2Id).length;
+        const leaderText = score1 > score2
+          ? `${b1.name} ${lang === 'it' ? 'è in testa' : 'is leading'}`
+          : score2 > score1
+            ? `${b2.name} ${lang === 'it' ? 'è in testa' : 'is leading'}`
+            : (lang === 'it' ? 'Pareggio temporaneo' : 'Temporary tie');
+
+        return (
+          <Modal
+            title={lang === 'it' ? 'Match in Corso' : 'Match in Progress'}
+            onClose={cancelMatch}
+            maxWidth={520}
+            closeOnOverlayClick={false}
+          >
+            {/* Leader Status */}
+            <div style={{ background: 'var(--surface-2)', padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(0,212,255,0.08)', textAlign: 'center', marginBottom: 16 }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontFamily: 'Orbitron', textTransform: 'uppercase', marginBottom: 2 }}>
+                {lang === 'it' ? 'Leader Attuale' : 'Current Leader'}
               </div>
-              <div style={{ fontFamily: 'Orbitron', fontSize: '1.2rem', color: 'var(--secondary)', fontWeight: 900 }}>VS</div>
-              {/* B2 */}
-              <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontWeight: 700, fontSize: '1.1rem', color: score2 > score1 ? 'var(--accent)' : 'white' }}>{b2.name}</div>
-                <div style={{ fontFamily: 'Orbitron', fontSize: '2.5rem', fontWeight: 900, color: score2 > score1 ? 'var(--accent)' : 'var(--text-muted)' }}>{score2}</div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent)' }}>
+                ⚡ {leaderText}
               </div>
             </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 8, fontFamily: 'Orbitron' }}>
+
+            {/* Blader Scores Side by Side */}
+            <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+              {/* B1 Box */}
+              <div style={{
+                flex: 1, background: 'var(--surface-2)', padding: '14px 12px', borderRadius: 12,
+                border: `1px solid ${score1 > score2 ? 'var(--primary)' : 'var(--border)'}`,
+                textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8
+              }}>
+                <div className="avatar avatar-md" style={{ background: b1.avatar_color, color: 'white', fontFamily: 'Orbitron', fontSize: '0.65rem', fontWeight: 700, overflow: 'hidden' }}>
+                  {b1.avatar_image ? <img src={b1.avatar_image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : b1.avatar_initials}
+                </div>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', width: '100%' }}>{b1.name}</div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--primary)', fontFamily: 'Orbitron', lineHeight: 1 }}>
+                  {score1} <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 500 }}>{lang === 'it' ? 'PT' : 'PTS'}</span>
+                </div>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: b1Fouls > 0 ? '#ffaa00' : 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                  ⚠️ {b1Fouls} {b1Fouls === 1 ? (lang === 'it' ? 'Fallo' : 'Foul') : (lang === 'it' ? 'Falli' : 'Fouls')}
+                </div>
+                {b1Fouls % 2 === 1 && (
+                  <div style={{ fontSize: '0.55rem', color: '#ffaa00', marginTop: -2 }}>
+                    {lang === 'it' ? 'Prossimo = +1 pt avv.' : 'Next = +1 pt opp.'}
+                  </div>
+                )}
+              </div>
+
+              {/* B2 Box */}
+              <div style={{
+                flex: 1, background: 'var(--surface-2)', padding: '14px 12px', borderRadius: 12,
+                border: `1px solid ${score2 > score1 ? 'var(--danger)' : 'var(--border)'}`,
+                textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8
+              }}>
+                <div className="avatar avatar-md" style={{ background: b2.avatar_color, color: 'white', fontFamily: 'Orbitron', fontSize: '0.65rem', fontWeight: 700, overflow: 'hidden' }}>
+                  {b2.avatar_image ? <img src={b2.avatar_image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : b2.avatar_initials}
+                </div>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', width: '100%' }}>{b2.name}</div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--danger)', fontFamily: 'Orbitron', lineHeight: 1 }}>
+                  {score2} <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 500 }}>{lang === 'it' ? 'PT' : 'PTS'}</span>
+                </div>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: b2Fouls > 0 ? '#ffaa00' : 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                  ⚠️ {b2Fouls} {b2Fouls === 1 ? (lang === 'it' ? 'Fallo' : 'Foul') : (lang === 'it' ? 'Falli' : 'Fouls')}
+                </div>
+                {b2Fouls % 2 === 1 && (
+                  <div style={{ fontSize: '0.55rem', color: '#ffaa00', marginTop: -2 }}>
+                    {lang === 'it' ? 'Prossimo = +1 pt avv.' : 'Next = +1 pt opp.'}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', marginBottom: 20, fontFamily: 'Orbitron' }}>
               {lang === 'it' ? `Soglia per la vittoria: ${tournament.point_threshold} punti` : `Threshold to win: ${tournament.point_threshold} points`}
             </div>
-          </div>
 
-          {/* History */}
-          <div className="card" style={{ background: 'var(--surface-2)', marginBottom: 24, padding: 16 }}>
-            <div style={{ fontFamily: 'Orbitron', fontSize: '0.7rem', color: 'var(--text-muted)', letterSpacing: 2, marginBottom: 12, textTransform: 'uppercase' }}>
-              {lang === 'it' ? 'Storico Round' : 'Round History'}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {matchRounds.map((r, idx) => {
-                let text = '';
-                let color = 'var(--text)';
-                let badgeText = '';
-                let badgeColor = '';
-                let ptsText = '';
+            {/* History */}
+            <div className="card" style={{ background: 'var(--surface-2)', marginBottom: 20, padding: 16 }}>
+              <div style={{ fontFamily: 'Orbitron', fontSize: '0.7rem', color: 'var(--text-muted)', letterSpacing: 2, marginBottom: 12, textTransform: 'uppercase' }}>
+                {lang === 'it' ? 'Storico Round' : 'Round History'}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto', paddingRight: 4 }} className="custom-scrollbar">
+                {matchRounds.map((r, idx) => {
+                  let text = '';
+                  let color = 'var(--text)';
+                  let badgeText = '';
+                  let badgeColor = '';
+                  let ptsText = '';
 
-                if (r.round_type === 'draw') {
-                  text = lang === 'it' ? 'Pareggio' : 'Draw';
-                  color = 'var(--text-muted)';
-                  badgeText = lang === 'it' ? 'Pareggio' : 'Draw';
-                  badgeColor = FINISH_COLORS.draw;
-                } else if (r.round_type === 'foul') {
-                  const foulBlader = bladerMap[r.foul_blader_id || '']?.name || 'Blader';
-                  text = lang === 'it' ? `Fallo commesso da ${foulBlader}` : `Foul committed by ${foulBlader}`;
-                  color = '#ffaa00';
-                  badgeText = lang === 'it' ? 'Fallo' : 'Foul';
-                  badgeColor = FINISH_COLORS.foul;
-                  if (r.b1_points > 0) {
-                    const opponent = bladerMap[b1Id]?.name || 'Player 1';
-                    text += ` (+1 pt a ${opponent})`;
-                  } else if (r.b2_points > 0) {
-                    const opponent = bladerMap[b2Id]?.name || 'Player 2';
-                    text += ` (+1 pt a ${opponent})`;
+                  if (r.round_type === 'draw') {
+                    text = lang === 'it' ? 'Pareggio' : 'Draw';
+                    color = 'var(--text-muted)';
+                    badgeText = lang === 'it' ? 'Pareggio' : 'Draw';
+                    badgeColor = FINISH_COLORS.draw;
+                  } else if (r.round_type === 'foul') {
+                    const foulBlader = bladerMap[r.foul_blader_id || '']?.name || 'Blader';
+                    text = lang === 'it' ? `Fallo di ${foulBlader}` : `Foul by ${foulBlader}`;
+                    color = '#ffaa00';
+                    badgeText = lang === 'it' ? 'Fallo' : 'Foul';
+                    badgeColor = FINISH_COLORS.foul;
+                    if (r.b1_points > 0) {
+                      const opponent = bladerMap[b1Id]?.name || 'Player 1';
+                      text += ` (+1 pt a ${opponent})`;
+                    } else if (r.b2_points > 0) {
+                      const opponent = bladerMap[b2Id]?.name || 'Player 2';
+                      text += ` (+1 pt a ${opponent})`;
+                    }
+                  } else {
+                    const roundWinner = bladerMap[r.winner_id || ''];
+                    text = roundWinner?.name || '—';
+                    badgeText = FINISH_LABELS[r.finish_type || 'spin'];
+                    badgeColor = FINISH_COLORS[r.finish_type || 'spin'];
+                    ptsText = ` (+${r.b1_points || r.b2_points})`;
                   }
-                } else {
-                  const roundWinner = bladerMap[r.winner_id || ''];
-                  text = roundWinner?.name || '—';
-                  badgeText = FINISH_LABELS[r.finish_type || 'spin'];
-                  badgeColor = FINISH_COLORS[r.finish_type || 'spin'];
-                  ptsText = ` (+${r.b1_points || r.b2_points})`;
-                }
 
-                return (
-                  <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyItems: 'space-between', padding: '6px 10px', background: 'var(--surface-3)', borderRadius: 6 }}>
-                    <span style={{ fontFamily: 'Orbitron', fontSize: '0.65rem', color: 'var(--text-muted)', marginRight: 10 }}>R{idx + 1}</span>
-                    <span style={{ fontWeight: 600, fontSize: '0.85rem', flex: 1, color }}>{text}</span>
-                    <span style={{
-                      fontSize: '0.65rem', padding: '2px 8px', borderRadius: 99,
-                      background: `${badgeColor}22`,
-                      color: badgeColor,
-                      fontWeight: 700, textTransform: 'uppercase'
+                  return (
+                    <div key={idx} style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '8px 10px', background: 'var(--surface-3)', borderRadius: 8,
+                      fontSize: '0.8rem', borderLeft: `3px solid ${badgeColor}`
                     }}>
-                      {badgeText}{ptsText}
-                    </span>
-                  </div>
-                );
-              })}
+                      <span style={{ fontFamily: 'Orbitron', fontSize: '0.6rem', color: 'var(--text-muted)', width: 36 }}>R{idx + 1}</span>
+                      <span style={{ fontWeight: 600, fontSize: '0.85rem', flex: 1, color, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{text}</span>
+                      <span style={{
+                        fontSize: '0.55rem', padding: '2px 6px', borderRadius: 4,
+                        background: `${badgeColor}22`,
+                        color: badgeColor,
+                        fontWeight: 700, textTransform: 'uppercase'
+                      }}>
+                        {badgeText}{ptsText}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
 
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-            <button className="btn btn-secondary" onClick={cancelMatch} id="cancel-progress-match">
-              {lang === 'it' ? 'Annulla Match' : 'Cancel Match'}
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={() => setMatchPhase('animation')}
-              id="start-next-round"
-            >
-              <Zap size={16} />
-              {lang === 'it' ? `Inizia Round ${matchRounds.length + 1}` : `Start Round ${matchRounds.length + 1}`}
-            </button>
-          </div>
-        </Modal>
-      )}
+            {/* Actions */}
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap', marginTop: 12 }}>
+              <button
+                className="btn btn-secondary"
+                onClick={cancelMatch}
+                style={{ borderRadius: 100, padding: '10px 20px', fontSize: '0.85rem' }}
+                id="cancel-progress-match"
+              >
+                {lang === 'it' ? 'Annulla Match' : 'Cancel Match'}
+              </button>
+              
+              <button
+                className="btn btn-primary"
+                style={{
+                  padding: '10px 24px', borderRadius: 100,
+                  boxShadow: '0 0 20px var(--primary-glow)',
+                  transition: 'all 0.3s',
+                  fontSize: '0.85rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+                onClick={() => setMatchPhase('animation')}
+                id="start-next-round"
+              >
+                <Zap size={14} />
+                {lang === 'it' ? `Inizia Round ${matchRounds.length + 1}` : `Start Round ${matchRounds.length + 1}`}
+              </button>
+
+              <button
+                className="btn btn-secondary"
+                style={{
+                  padding: '10px 24px', borderRadius: 100,
+                  border: '1px solid var(--accent)',
+                  color: 'var(--accent)',
+                  background: 'transparent',
+                  boxShadow: '0 0 20px rgba(255,215,0,0.15)',
+                  transition: 'all 0.3s',
+                  fontSize: '0.85rem',
+                }}
+                onClick={handleAnimationReady}
+                id="btn-fast-battle"
+              >
+                ⚡ {lang === 'it' ? 'Registra Risultato' : 'Record Result'}
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }

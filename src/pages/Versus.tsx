@@ -243,25 +243,42 @@ export default function Versus() {
           </div>
 
           <div style={{ display: 'flex', gap: 12 }}>
-            <div style={{ flex: 1, background: 'var(--surface-2)', padding: 12, borderRadius: 10, textAlign: 'center' }}>
-              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontFamily: 'Orbitron', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{b1Data?.name}</div>
-              <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: b1Fouls > 0 ? '#ffaa00' : 'var(--text)', marginTop: 4 }}>
+            <div style={{ flex: 1, background: 'var(--surface-2)', padding: '14px 12px', borderRadius: 12, border: '1px solid rgba(0,212,255,0.05)', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontFamily: 'Orbitron', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', marginBottom: 6 }}>{b1Data?.name}</div>
+              
+              {/* Score / Wins */}
+              <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--primary)', fontFamily: 'Orbitron' }}>
+                {is1on1 ? b1Points : b1Wins} <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 500 }}>{is1on1 ? (lang === 'it' ? 'PT' : 'PTS') : (lang === 'it' ? 'VITT.' : 'WINS')}</span>
+              </div>
+
+              {/* Fouls */}
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: b1Fouls > 0 ? '#ffaa00' : 'var(--text-muted)', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                 ⚠️ {b1Fouls} {b1Fouls === 1 ? (lang === 'it' ? 'Fallo' : 'Foul') : (lang === 'it' ? 'Falli' : 'Fouls')}
               </div>
+              
               {b1Fouls % 2 === 1 && (
-                <div style={{ fontSize: '0.6rem', color: '#ffaa00', marginTop: 2 }}>
-                  {lang === 'it' ? 'Prossimo fallo = +1 pt avv.' : 'Next foul = +1 pt opp.'}
+                <div style={{ fontSize: '0.55rem', color: '#ffaa00', marginTop: 4 }}>
+                  {lang === 'it' ? 'Prossimo = +1 pt avv.' : 'Next = +1 pt opp.'}
                 </div>
               )}
             </div>
-            <div style={{ flex: 1, background: 'var(--surface-2)', padding: 12, borderRadius: 10, textAlign: 'center' }}>
-              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontFamily: 'Orbitron', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{b2Data?.name}</div>
-              <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: b2Fouls > 0 ? '#ffaa00' : 'var(--text)', marginTop: 4 }}>
+
+            <div style={{ flex: 1, background: 'var(--surface-2)', padding: '14px 12px', borderRadius: 12, border: '1px solid rgba(255,68,68,0.05)', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontFamily: 'Orbitron', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', marginBottom: 6 }}>{b2Data?.name}</div>
+              
+              {/* Score / Wins */}
+              <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--danger)', fontFamily: 'Orbitron' }}>
+                {is1on1 ? b2Points : b2Wins} <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 500 }}>{is1on1 ? (lang === 'it' ? 'PT' : 'PTS') : (lang === 'it' ? 'VITT.' : 'WINS')}</span>
+              </div>
+
+              {/* Fouls */}
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: b2Fouls > 0 ? '#ffaa00' : 'var(--text-muted)', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                 ⚠️ {b2Fouls} {b2Fouls === 1 ? (lang === 'it' ? 'Fallo' : 'Foul') : (lang === 'it' ? 'Falli' : 'Fouls')}
               </div>
+              
               {b2Fouls % 2 === 1 && (
-                <div style={{ fontSize: '0.6rem', color: '#ffaa00', marginTop: 2 }}>
-                  {lang === 'it' ? 'Prossimo fallo = +1 pt avv.' : 'Next foul = +1 pt opp.'}
+                <div style={{ fontSize: '0.55rem', color: '#ffaa00', marginTop: 4 }}>
+                  {lang === 'it' ? 'Prossimo = +1 pt avv.' : 'Next = +1 pt opp.'}
                 </div>
               )}
             </div>

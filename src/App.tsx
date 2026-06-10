@@ -70,8 +70,8 @@ export default function App() {
       console.error(err);
       setConnectionError(
         lang === 'it'
-          ? `Impossibile connettersi al server. Verifica l'indirizzo e che il backend sia attivo.`
-          : `Failed to connect to the server. Verify the address and check if the backend is running.`
+          ? `Impossibile connettersi: ${err.message || err.toString()}`
+          : `Failed to connect: ${err.message || err.toString()}`
       );
     } finally {
       setConnecting(false);

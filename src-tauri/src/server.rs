@@ -2575,7 +2575,7 @@ async function loadTournaments() {
 // Gestione Tabs
 function showTab(tabId) {
   const lobbyTabs = document.querySelectorAll('#mainLobbyView > .tabs > .tab');
-  lobbyTabs.forEach((t, i) => t.classList.toggle('active', ['players','tournaments','profile','history'][i]===tabId));
+  lobbyTabs.forEach((t, i) => t.classList.toggle('active', ['players','tournaments','beys','profile','history'][i]===tabId));
   
   const lobbyContents = document.querySelectorAll('#mainLobbyView > .tab-content');
   lobbyContents.forEach(c => c.classList.remove('active'));
@@ -3572,33 +3572,73 @@ async function startQrScanner(forSlot = true) {
     try {
       await html5QrCode.stop();
     } catch(e) {}
+    html5QrCode = null;
   }
   
-  html5QrCode = new Html5Qrcode("qr-reader");
-  
-  const qrCodeSuccessCallback = async (decodedText, decodedResult) => {
-    document.getElementById('qr-reader-results').textContent = "Codice rilevato! Elaborazione...";
+  // Wait 200ms to ensure the modal is fully visible and rendered
+  setTimeout(async () => {
     try {
-      await html5QrCode.stop();
-      html5QrCode = null;
-    } catch(e) {}
-    closeOverlay('qrScannerModal');
-    await handleScannedQr(decodedText, forSlot);
-  };
-  
-  const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-  
-  try {
-    await html5QrCode.start({ facingMode: "environment" }, config, qrCodeSuccessCallback);
-  } catch (err) {
-    console.error("Camera access error:", err);
-    document.getElementById('qr-reader').innerHTML = `
-      <div style="padding: 20px; color: var(--danger); font-size: 0.95rem; line-height: 1.4;">
-        Errore di accesso alla fotocamera.<br><br>
-        Assicurati di aver concesso i permessi necessari e che il protocollo sia sicuro (HTTPS o localhost).
-      </div>
-    `;
-  }
+      html5QrCode = new Html5Qrcode("qr-reader");
+      
+      const qrCodeSuccessCallback = async (decodedText, decodedResult) => {
+        document.getElementById('qr-reader-results').textContent = "Codice rilevato! Elaborazione...";
+        try {
+          await html5QrCode.stop();
+          html5QrCode = null;
+        } catch(e) {}
+        closeOverlay('qrScannerModal');
+        await handleScannedQr(decodedText, forSlot);
+      };
+      
+      // Calculate dynamic qrbox based on container size to prevent OverconstrainedError on small screens
+      const qrboxFunction = (viewfinderWidth, viewfinderHeight) => {
+        const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+        const qrboxSize = Math.floor(minEdge * 0.7);
+        return {
+          width: qrboxSize,
+          height: qrboxSize
+        };
+      };
+      
+      const config = { 
+        fps: 15, 
+        qrbox: qrboxFunction,
+        aspectRatio: 1.0
+      };
+      
+      // Try listing cameras to identify the back camera explicitly
+      try {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+          let cameraId = devices[0].id;
+          // Loop to find rear/back camera
+          for (const device of devices) {
+            const label = device.label.toLowerCase();
+            if (label.includes("back") || label.includes("rear") || label.includes("ambiente") || label.includes("environment") || label.includes("retro") || label.includes("posteriore") || label.includes("main")) {
+              cameraId = device.id;
+              break;
+            }
+          }
+          await html5QrCode.start(cameraId, config, qrCodeSuccessCallback);
+        } else {
+          // Fallback to default environment facingMode constraint
+          await html5QrCode.start({ facingMode: "environment" }, config, qrCodeSuccessCallback);
+        }
+      } catch (camErr) {
+        console.warn("Could not list cameras, using facingMode constraint fallback:", camErr);
+        // Fallback to environment facingMode
+        await html5QrCode.start({ facingMode: "environment" }, config, qrCodeSuccessCallback);
+      }
+    } catch (err) {
+      console.error("Camera access error:", err);
+      document.getElementById('qr-reader').innerHTML = `
+        <div style="padding: 20px; color: var(--danger); font-size: 0.95rem; line-height: 1.4;">
+          Errore di accesso alla fotocamera.<br><br>
+          Assicurati di aver concesso i permessi necessari e che il protocollo sia sicuro (HTTPS o localhost).
+        </div>
+      `;
+    }
+  }, 200);
 }
 
 async function stopQrScanner() {

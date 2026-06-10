@@ -4,6 +4,8 @@ import {
 } from 'lucide-react';
 import { useSettings } from '../../store';
 import { t } from '../../types';
+import { getRemoteUrl } from '../../services/api';
+import { useMemo } from 'react';
 
 const NAV_ITEMS = [
   { to: '/', icon: Home, key: 'home' },
@@ -15,8 +17,18 @@ const NAV_ITEMS = [
 ];
 
 export default function Sidebar() {
-  const { lang, localIp } = useSettings();
+  const { lang } = useSettings();
   const tr = t[lang];
+  const serverUrl = getRemoteUrl();
+
+  const displayHost = useMemo(() => {
+    try {
+      const url = new URL(serverUrl);
+      return url.host; // e.g. "beyblade.printingarage.it" or "127.0.0.1:7878"
+    } catch {
+      return '127.0.0.1';
+    }
+  }, [serverUrl]);
 
   return (
     <aside className="sidebar">
@@ -49,18 +61,16 @@ export default function Sidebar() {
 
       {/* Footer with IP */}
       <div className="sidebar-footer">
-        {localIp && (
-          <div
-            className="nav-item"
-            style={{ cursor: 'default', fontSize: '0.78rem' }}
-          >
-            <span className="nav-item-icon"><Wifi size={16} color="var(--success)" /></span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: 1, fontFamily: 'Orbitron' }}>Server</span>
-              <span style={{ color: 'var(--success)', fontFamily: 'Orbitron', fontSize: '0.7rem' }}>{localIp}:7878</span>
-            </div>
+        <div
+          className="nav-item"
+          style={{ cursor: 'default', fontSize: '0.78rem' }}
+        >
+          <span className="nav-item-icon"><Wifi size={16} color="var(--success)" /></span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: 1, fontFamily: 'Orbitron' }}>Server</span>
+            <span style={{ color: 'var(--success)', fontFamily: 'Orbitron', fontSize: '0.7rem', wordBreak: 'break-all' }}>{displayHost}</span>
           </div>
-        )}
+        </div>
         <NavLink to="/settings" className="nav-item" style={{ marginTop: 4 }}>
           <div className="nav-indicator" />
           <span className="nav-item-icon"><Settings size={18} /></span>
