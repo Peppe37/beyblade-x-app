@@ -114,6 +114,22 @@ pub struct ActivityLog {
     pub created_at: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Part {
+    pub id: String,
+    pub part_type: String,  // blade | ratchet | bit | assist_blade | lock_chip | over_blade
+    pub name: String,
+    pub serial: String,
+    pub pack: String,
+    pub brand: String,      // takara_tomy | hasbro
+    pub series: String,     // bx | ux | cx | cx_new
+    pub color: Option<String>,
+    pub image_url: Option<String>,
+    pub protrusions: Option<i32>,
+    pub height: Option<i32>,
+    pub created_at: String,
+}
+
 pub struct Database {
     pub conn: Connection,
 }
@@ -214,6 +230,21 @@ impl Database {
                 blader1_points INTEGER NOT NULL DEFAULT 0,
                 blader2_points INTEGER NOT NULL DEFAULT 0,
                 rounds TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS parts (
+                id TEXT PRIMARY KEY,
+                part_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                serial TEXT NOT NULL DEFAULT '',
+                pack TEXT NOT NULL DEFAULT '',
+                brand TEXT NOT NULL DEFAULT 'takara_tomy',
+                series TEXT NOT NULL DEFAULT 'bx',
+                color TEXT,
+                image_url TEXT,
+                protrusions INTEGER,
+                height INTEGER,
                 created_at TEXT NOT NULL
             );
         ")?;
@@ -958,6 +989,97 @@ impl Database {
         .filter_map(|r| r.ok())
         .collect();
         Ok(logs)
+    }
+
+    // ─── Parts ───────────────────────────────────────────────────────────────
+
+    pub fn get_parts(&self, type_filter: Option<&str>, series_filter: Option<&str>, brand_filter: Option<&str>) -> Result<Vec<Part>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, part_type, name, serial, pack, brand, series, color, image_url, protrusions, height, created_at FROM parts ORDER BY part_type, series, name"
+        )?;
+        let all: Vec<Part> = stmt.query_map([], |row| {
+            Ok(Part {
+                id: row.get(0)?,
+                part_type: row.get(1)?,
+                name: row.get(2)?,
+                serial: row.get(3)?,
+                pack: row.get(4)?,
+                brand: row.get(5)?,
+                series: row.get(6)?,
+                color: row.get(7)?,
+                image_url: row.get(8)?,
+                protrusions: row.get(9)?,
+                height: row.get(10)?,
+                created_at: row.get(11)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+        let filtered = all.into_iter()
+            .filter(|p| type_filter.map_or(true, |t| p.part_type == t))
+            .filter(|p| series_filter.map_or(true, |s| p.series == s))
+            .filter(|p| brand_filter.map_or(true, |b| p.brand == b))
+            .collect();
+        Ok(filtered)
+    }
+
+    pub fn get_part(&self, id: &str) -> Result<Option<Part>> {
+        let result = self.conn.query_row(
+            "SELECT id, part_type, name, serial, pack, brand, series, color, image_url, protrusions, height, created_at FROM parts WHERE id=?1",
+            rusqlite::params![id],
+            |row| Ok(Part {
+                id: row.get(0)?,
+                part_type: row.get(1)?,
+                name: row.get(2)?,
+                serial: row.get(3)?,
+                pack: row.get(4)?,
+                brand: row.get(5)?,
+                series: row.get(6)?,
+                color: row.get(7)?,
+                image_url: row.get(8)?,
+                protrusions: row.get(9)?,
+                height: row.get(10)?,
+                created_at: row.get(11)?,
+            }),
+        ).ok();
+        Ok(result)
+    }
+
+    pub fn create_part(
+        &self, part_type: &str, name: &str, serial: &str, pack: &str,
+        brand: &str, series: &str, color: Option<&str>, image_url: Option<&str>,
+        protrusions: Option<i32>, height: Option<i32>,
+    ) -> Result<Part> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let created_at = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO parts (id, part_type, name, serial, pack, brand, series, color, image_url, protrusions, height, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            rusqlite::params![id, part_type, name, serial, pack, brand, series, color, image_url, protrusions, height, created_at],
+        )?;
+        Ok(Part {
+            id, part_type: part_type.to_string(), name: name.to_string(),
+            serial: serial.to_string(), pack: pack.to_string(), brand: brand.to_string(),
+            series: series.to_string(), color: color.map(|s| s.to_string()),
+            image_url: image_url.map(|s| s.to_string()), protrusions, height, created_at,
+        })
+    }
+
+    pub fn update_part(
+        &self, id: &str, part_type: &str, name: &str, serial: &str, pack: &str,
+        brand: &str, series: &str, color: Option<&str>, image_url: Option<&str>,
+        protrusions: Option<i32>, height: Option<i32>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE parts SET part_type=?1, name=?2, serial=?3, pack=?4, brand=?5, series=?6, color=?7, image_url=?8, protrusions=?9, height=?10 WHERE id=?11",
+            rusqlite::params![part_type, name, serial, pack, brand, series, color, image_url, protrusions, height, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_part(&self, id: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM parts WHERE id=?1", rusqlite::params![id])?;
+        Ok(())
     }
 }
 

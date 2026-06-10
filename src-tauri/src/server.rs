@@ -92,10 +92,85 @@ impl WsState {
 struct AppState {
     db: Arc<Mutex<Database>>,
     ws_state: Arc<WsState>,
+    admin_user: String,
+    admin_pass: String,
+}
+
+fn load_admin_credentials() -> (String, String) {
+    if let (Ok(u), Ok(p)) = (std::env::var("ADMIN_USER"), std::env::var("ADMIN_PASS")) {
+        return (u, p);
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    for path in [
+        std::path::PathBuf::from(".env"),
+        std::path::PathBuf::from("../.env"),
+        std::path::Path::new(&home).join(".beyblade-x-app").join(".env"),
+    ] {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let mut user = None;
+            let mut pass = None;
+            for line in content.lines() {
+                let line = line.trim();
+                if line.starts_with('#') || line.is_empty() { continue; }
+                if let Some(v) = line.strip_prefix("ADMIN_USER=") {
+                    user = Some(v.trim_matches('"').trim_matches('\'').to_string());
+                } else if let Some(v) = line.strip_prefix("ADMIN_PASS=") {
+                    pass = Some(v.trim_matches('"').trim_matches('\'').to_string());
+                }
+            }
+            if let (Some(u), Some(p)) = (user, pass) {
+                return (u, p);
+            }
+        }
+    }
+    ("admin".to_string(), "beyblade".to_string())
+}
+
+fn decode_base64(s: &str) -> Option<Vec<u8>> {
+    let mut table = [-1i8; 256];
+    for (i, &c) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".iter().enumerate() {
+        table[c as usize] = i as i8;
+    }
+    let s = s.trim_end_matches('=');
+    let mut result = Vec::new();
+    let mut buf = 0u32;
+    let mut bits = 0u32;
+    for &b in s.as_bytes() {
+        let val = table[b as usize];
+        if val < 0 { return None; }
+        buf = (buf << 6) | val as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            result.push((buf >> bits) as u8);
+            buf &= (1 << bits) - 1;
+        }
+    }
+    Some(result)
+}
+
+fn check_basic_auth(headers: &axum::http::HeaderMap, user: &str, pass: &str) -> bool {
+    if let Some(auth) = headers.get("authorization") {
+        if let Ok(auth_str) = auth.to_str() {
+            if let Some(encoded) = auth_str.strip_prefix("Basic ") {
+                if let Some(decoded) = decode_base64(encoded.trim()) {
+                    if let Ok(s) = String::from_utf8(decoded) {
+                        let mut parts = s.splitn(2, ':');
+                        if let (Some(u), Some(p)) = (parts.next(), parts.next()) {
+                            return u == user && p == pass;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 pub async fn start_server(db: Arc<Mutex<Database>>, ws_state: Arc<WsState>) {
-    let state = AppState { db, ws_state };
+    let (admin_user, admin_pass) = load_admin_credentials();
+    println!("Admin panel: http://0.0.0.0:7878/admin  (user: {})", admin_user);
+    let state = AppState { db, ws_state, admin_user, admin_pass };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -128,6 +203,13 @@ pub async fn start_server(db: Arc<Mutex<Database>>, ws_state: Arc<WsState>) {
         .route("/api/custom-arenas", get(get_custom_arenas_api).post(create_custom_arena_api))
         .route("/api/custom-arenas/:id", delete(delete_custom_arena_api))
         .route("/api/activities", get(get_activities_api))
+        // Public parts API
+        .route("/api/parts", get(get_parts_api))
+        .route("/api/parts/:id", get(get_part_api))
+        // Admin panel
+        .route("/admin", get(admin_page))
+        .route("/api/admin/parts", post(create_part_api))
+        .route("/api/admin/parts/:id", put(update_part_api).delete(delete_part_api))
         .layer(cors)
         .with_state(state);
 
@@ -1101,6 +1183,133 @@ async fn delete_custom_arena_api(
     }
 }
 
+// ─── Admin Page ──────────────────────────────────────────────────────────────
+
+async fn admin_page(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    if !check_basic_auth(&headers, &state.admin_user, &state.admin_pass) {
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            [(axum::http::header::WWW_AUTHENTICATE, "Basic realm=\"BeybladeX Admin\"")],
+            axum::response::Html("<h1>401 Unauthorized</h1>"),
+        ).into_response();
+    }
+    axum::response::Html(admin_html()).into_response()
+}
+
+// ─── Public Parts API ────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct PartsQuery {
+    #[serde(rename = "type")]
+    part_type: Option<String>,
+    series: Option<String>,
+    brand: Option<String>,
+}
+
+async fn get_parts_api(
+    State(state): State<AppState>,
+    Query(params): Query<PartsQuery>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.get_parts(params.part_type.as_deref(), params.series.as_deref(), params.brand.as_deref()) {
+        Ok(parts) => (axum::http::StatusCode::OK, Json(parts)).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+async fn get_part_api(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.get_part(&id) {
+        Ok(Some(p)) => (axum::http::StatusCode::OK, Json(p)).into_response(),
+        Ok(None) => (axum::http::StatusCode::NOT_FOUND, Json(json!({ "error": "Not found" }))).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+// ─── Admin Parts API (protected) ─────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct PartPayload {
+    part_type: String,
+    name: String,
+    serial: Option<String>,
+    pack: Option<String>,
+    brand: Option<String>,
+    series: Option<String>,
+    color: Option<String>,
+    image_url: Option<String>,
+    protrusions: Option<i32>,
+    height: Option<i32>,
+}
+
+async fn create_part_api(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(p): Json<PartPayload>,
+) -> impl IntoResponse {
+    if !check_basic_auth(&headers, &state.admin_user, &state.admin_pass) {
+        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({ "error": "Unauthorized" }))).into_response();
+    }
+    let db = state.db.lock().await;
+    match db.create_part(
+        &p.part_type, &p.name,
+        p.serial.as_deref().unwrap_or(""),
+        p.pack.as_deref().unwrap_or(""),
+        p.brand.as_deref().unwrap_or("takara_tomy"),
+        p.series.as_deref().unwrap_or("bx"),
+        p.color.as_deref(), p.image_url.as_deref(),
+        p.protrusions, p.height,
+    ) {
+        Ok(part) => (axum::http::StatusCode::CREATED, Json(part)).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+async fn update_part_api(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path(id): Path<String>,
+    Json(p): Json<PartPayload>,
+) -> impl IntoResponse {
+    if !check_basic_auth(&headers, &state.admin_user, &state.admin_pass) {
+        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({ "error": "Unauthorized" }))).into_response();
+    }
+    let db = state.db.lock().await;
+    match db.update_part(
+        &id, &p.part_type, &p.name,
+        p.serial.as_deref().unwrap_or(""),
+        p.pack.as_deref().unwrap_or(""),
+        p.brand.as_deref().unwrap_or("takara_tomy"),
+        p.series.as_deref().unwrap_or("bx"),
+        p.color.as_deref(), p.image_url.as_deref(),
+        p.protrusions, p.height,
+    ) {
+        Ok(_) => (axum::http::StatusCode::OK, Json(json!({ "status": "updated" }))).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+async fn delete_part_api(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if !check_basic_auth(&headers, &state.admin_user, &state.admin_pass) {
+        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({ "error": "Unauthorized" }))).into_response();
+    }
+    let db = state.db.lock().await;
+    match db.delete_part(&id) {
+        Ok(_) => (axum::http::StatusCode::OK, Json(json!({ "status": "deleted" }))).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
 fn generate_code() -> String {
     use rand::Rng;
     const CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -1990,6 +2199,27 @@ fn mobile_lobby_html() -> String {
   </div>
 </div>
 
+<!-- QR ASSOCIATION MODAL -->
+<div class="overlay" id="qrAssociationModal" style="z-index: 250;">
+  <div class="overlay-content" style="max-width: 400px; text-align: center;">
+    <button class="overlay-close" onclick="closeOverlay('qrAssociationModal')">×</button>
+    <div class="overlay-title">Associa Codice QR</div>
+    <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 16px; line-height: 1.4;">
+      Codice sconosciuto rilevato. A quale Beyblade standard appartiene questo QR?
+    </p>
+    <div class="form-group" style="text-align: left; margin-bottom: 20px;">
+      <label class="form-label" style="font-size: 0.75rem;">Seleziona Beyblade</label>
+      <select class="form-input" id="qrAssociateSelect" style="background: var(--surface-2); color: var(--text); border: 1px solid var(--border); font-size: 0.85rem; padding: 10px;">
+        <!-- Filled via JS -->
+      </select>
+    </div>
+    <div style="display: flex; gap: 10px; justify-content: center;">
+      <button class="btn btn-secondary" onclick="closeOverlay('qrAssociationModal')">ANNULLA</button>
+      <button class="btn" id="qrAssociateBtn" style="background: var(--primary); color: var(--bg-dark);" onclick="confirmQrAssociation()">ASSOCIA</button>
+    </div>
+  </div>
+</div>
+
 <!-- SHARE BEY MODAL -->
 <div class="overlay" id="shareBeyModal" style="z-index: 200;">
   <div class="overlay-content" style="max-width: 350px; text-align: center;">
@@ -2168,7 +2398,23 @@ const BLADES = [
   { id: 'b_knight_shield', name: 'Knight Shield', type: 'defense', weight: 34.0, attack_multiplier: 0.8, defense_multiplier: 1.6, stamina_multiplier: 0.9 },
   { id: 'b_shark_edge', name: 'Shark Edge', type: 'attack', weight: 33.5, attack_multiplier: 1.6, defense_multiplier: 0.7, stamina_multiplier: 0.6 },
   { id: 'b_cobalt_dragoon', name: 'Cobalt Dragoon', type: 'attack', weight: 38.0, attack_multiplier: 1.8, defense_multiplier: 0.9, stamina_multiplier: 0.5 },
-  { id: 'b_wizard_rod', name: 'Wizard Rod', type: 'stamina', weight: 35.0, attack_multiplier: 0.8, defense_multiplier: 1.3, stamina_multiplier: 1.8 }
+  { id: 'b_wizard_rod', name: 'Wizard Rod', type: 'stamina', weight: 35.0, attack_multiplier: 0.8, defense_multiplier: 1.3, stamina_multiplier: 1.8 },
+  { id: 'b_knight_lance', name: 'Knight Lance', type: 'defense', weight: 34.2, attack_multiplier: 0.9, defense_multiplier: 1.5, stamina_multiplier: 1.0 },
+  { id: 'b_viper_tail', name: 'Viper Tail', type: 'stamina', weight: 33.8, attack_multiplier: 0.9, defense_multiplier: 1.1, stamina_multiplier: 1.4 },
+  { id: 'b_dran_dagger', name: 'Dran Dagger', type: 'attack', weight: 34.2, attack_multiplier: 1.4, defense_multiplier: 0.9, stamina_multiplier: 0.8 },
+  { id: 'b_hells_chain', name: 'Hells Chain', type: 'balance', weight: 33.5, attack_multiplier: 1.2, defense_multiplier: 1.2, stamina_multiplier: 1.1 },
+  { id: 'b_rhino_horn', name: 'Rhino Horn', type: 'defense', weight: 32.5, attack_multiplier: 0.8, defense_multiplier: 1.7, stamina_multiplier: 0.7 },
+  { id: 'b_phoenix_wing', name: 'Phoenix Wing', type: 'attack', weight: 38.0, attack_multiplier: 1.7, defense_multiplier: 1.0, stamina_multiplier: 0.9 },
+  { id: 'b_wyvern_gale', name: 'Wyvern Gale', type: 'stamina', weight: 32.5, attack_multiplier: 0.8, defense_multiplier: 1.1, stamina_multiplier: 1.5 },
+  { id: 'b_unicorn_sting', name: 'Unicorn Sting', type: 'balance', weight: 34.5, attack_multiplier: 1.2, defense_multiplier: 1.3, stamina_multiplier: 1.1 },
+  { id: 'b_sphinx_cowl', name: 'Sphinx Cowl', type: 'defense', weight: 33.2, attack_multiplier: 0.9, defense_multiplier: 1.5, stamina_multiplier: 1.0 },
+  { id: 'b_hells_hammer', name: 'Hells Hammer', type: 'balance', weight: 34.5, attack_multiplier: 1.3, defense_multiplier: 1.1, stamina_multiplier: 1.0 },
+  { id: 'b_dran_buster', name: 'Dran Buster', type: 'attack', weight: 35.0, attack_multiplier: 1.8, defense_multiplier: 0.7, stamina_multiplier: 0.6 },
+  { id: 'b_leon_claw', name: 'Leon Claw', type: 'balance', weight: 31.8, attack_multiplier: 1.1, defense_multiplier: 1.1, stamina_multiplier: 1.2 },
+  { id: 'b_black_shell', name: 'Black Shell', type: 'defense', weight: 34.5, attack_multiplier: 0.9, defense_multiplier: 1.6, stamina_multiplier: 0.9 },
+  { id: 'b_whale_wave', name: 'Whale Wave', type: 'balance', weight: 35.0, attack_multiplier: 1.3, defense_multiplier: 1.2, stamina_multiplier: 1.1 },
+  { id: 'b_leon_crest', name: 'Leon Crest', type: 'defense', weight: 37.5, attack_multiplier: 0.8, defense_multiplier: 1.8, stamina_multiplier: 0.9 },
+  { id: 'b_tyranno_beat', name: 'Tyranno Beat', type: 'attack', weight: 37.2, attack_multiplier: 1.6, defense_multiplier: 0.9, stamina_multiplier: 0.8 }
 ];
 
 const RATCHETS = [
@@ -2178,7 +2424,14 @@ const RATCHETS = [
   { id: 'r_9_60', name: '9-60', height: 60, sides: 9, weight: 7.2 },
   { id: 'r_3_80', name: '3-80', height: 80, sides: 3, weight: 6.6 },
   { id: 'r_4_80', name: '4-80', height: 80, sides: 4, weight: 6.9 },
-  { id: 'r_5_80', name: '5-80', height: 80, sides: 5, weight: 7.1 }
+  { id: 'r_5_80', name: '5-80', height: 80, sides: 5, weight: 7.1 },
+  { id: 'r_9_80', name: '9-80', height: 80, sides: 9, weight: 7.3 },
+  { id: 'r_1_60', name: '1-60', height: 60, sides: 1, weight: 6.4 },
+  { id: 'r_2_60', name: '2-60', height: 60, sides: 2, weight: 6.6 },
+  { id: 'r_3_70', name: '3-70', height: 70, sides: 3, weight: 6.5 },
+  { id: 'r_4_70', name: '4-70', height: 70, sides: 4, weight: 6.8 },
+  { id: 'r_5_70', name: '5-70', height: 70, sides: 5, weight: 7.0 },
+  { id: 'r_7_60', name: '7-60', height: 60, sides: 7, weight: 7.0 }
 ];
 
 const BITS = [
@@ -2190,7 +2443,17 @@ const BITS = [
   { id: 'bt_n', name: 'Needle (N)', type: 'defense', weight: 2.1, burst_resistance: 5, speed_multiplier: 0.6 },
   { id: 'bt_hn', name: 'High Needle (HN)', type: 'defense', weight: 2.2, burst_resistance: 5, speed_multiplier: 0.5 },
   { id: 'bt_db', name: 'Disc Ball (DB)', type: 'stamina', weight: 3.5, burst_resistance: 7, speed_multiplier: 0.9 },
-  { id: 'bt_c', name: 'Cyclone (C)', type: 'attack', weight: 2.5, burst_resistance: 9, speed_multiplier: 1.4 }
+  { id: 'bt_c', name: 'Cyclone (C)', type: 'attack', weight: 2.5, burst_resistance: 9, speed_multiplier: 1.4 },
+  { id: 'bt_r', name: 'Rush (R)', type: 'attack', weight: 2.1, burst_resistance: 8, speed_multiplier: 1.5 },
+  { id: 'bt_gf', name: 'Gear Flat (GF)', type: 'attack', weight: 2.3, burst_resistance: 8, speed_multiplier: 1.8 },
+  { id: 'bt_a', name: 'Accel (A)', type: 'attack', weight: 2.2, burst_resistance: 8, speed_multiplier: 1.6 },
+  { id: 'bt_p', name: 'Point (P)', type: 'balance', weight: 2.2, burst_resistance: 6, speed_multiplier: 1.1 },
+  { id: 'bt_gp', name: 'Gear Point (GP)', type: 'balance', weight: 2.3, burst_resistance: 6, speed_multiplier: 1.2 },
+  { id: 'bt_h', name: 'Hexa (H)', type: 'balance', weight: 2.4, burst_resistance: 7, speed_multiplier: 1.0 },
+  { id: 'bt_e', name: 'Elevate (E)', type: 'balance', weight: 2.4, burst_resistance: 6, speed_multiplier: 0.9 },
+  { id: 'bt_gn', name: 'Gear Needle (GN)', type: 'defense', weight: 2.2, burst_resistance: 5, speed_multiplier: 0.7 },
+  { id: 'bt_s', name: 'Spike (S)', type: 'defense', weight: 2.1, burst_resistance: 5, speed_multiplier: 0.6 },
+  { id: 'bt_q', name: 'Quake (Q)', type: 'attack', weight: 2.2, burst_resistance: 8, speed_multiplier: 1.6 }
 ];
 
 let customBeys = [];
@@ -3651,6 +3914,37 @@ async function stopQrScanner() {
   closeOverlay('qrScannerModal');
 }
 
+let pendingScannedQrText = '';
+let pendingScannedQrForSlot = null;
+
+function openQrAssociationModal(text, forSlot) {
+  pendingScannedQrText = text;
+  pendingScannedQrForSlot = forSlot;
+  
+  const select = document.getElementById('qrAssociateSelect');
+  select.innerHTML = STANDARD_BEYS.map(b => `<option value="${b.id}">${b.name} (${b.fullName})</option>`).join('');
+  openOverlay('qrAssociationModal');
+}
+
+async function confirmQrAssociation() {
+  const select = document.getElementById('qrAssociateSelect');
+  const selectedBeyId = select.value;
+  if (!selectedBeyId) return;
+  
+  let customMappings = {};
+  try {
+    customMappings = JSON.parse(localStorage.getItem('custom_qr_mappings') || '{}');
+  } catch(e) {}
+  
+  customMappings[pendingScannedQrText] = selectedBeyId;
+  localStorage.setItem('custom_qr_mappings', JSON.stringify(customMappings));
+  
+  closeOverlay('qrAssociationModal');
+  showToast("Associazione salvata con successo!", "success");
+  
+  await handleScannedQr(pendingScannedQrText, pendingScannedQrForSlot);
+}
+
 async function handleScannedQr(text, forSlot) {
   text = text.trim();
   console.log("Scanned text payload:", text);
@@ -3727,7 +4021,17 @@ async function handleScannedQr(text, forSlot) {
     resolvedBeyId = QR_MAPPINGS[rawCode];
   }
   
-  // 3. Fallback to exact ID match (eg dran-sword)
+  // 3. Check custom mappings from localStorage (e.g. for Hasbro or custom QRs)
+  if (!resolvedBeyId) {
+    try {
+      const customMappings = JSON.parse(localStorage.getItem('custom_qr_mappings') || '{}');
+      if (customMappings[text]) {
+        resolvedBeyId = customMappings[text];
+      }
+    } catch(e) {}
+  }
+  
+  // 4. Fallback to exact ID match (eg dran-sword)
   if (!resolvedBeyId) {
     const std = STANDARD_BEYS.find(b => b.id.toLowerCase() === text.toLowerCase() || b.name.toLowerCase() === text.toLowerCase());
     if (std) {
@@ -3749,7 +4053,8 @@ async function handleScannedQr(text, forSlot) {
       showToast(`Scansionato "${stdBey.name}". Usa "Slot Deck" per equipaggiarlo.`, "success");
     }
   } else {
-    showToast("QR non riconosciuto. Scansiona un QR Beyblade X originale o di condivisione.", "error");
+    // Open association modal instead of showing error toast
+    openQrAssociationModal(text, forSlot);
   }
 }
 
@@ -3791,6 +4096,447 @@ async function handleQrFileSelected(event) {
     event.target.value = '';
   }
 }
+</script>
+</body>
+</html>"##.to_string()
+}
+
+fn admin_html() -> String {
+r##"<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BeybladeX — Admin</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600&display=swap');
+  :root {
+    --bg:#0a0a1a;--surface:#12122a;--surface2:#1a1a38;--primary:#00d4ff;--secondary:#7c3aed;
+    --accent:#ffd700;--danger:#ff4444;--success:#00ff88;--text:#e2e8f0;--muted:#64748b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:'Rajdhani',system-ui,sans-serif;min-height:100vh;}
+  header{background:var(--surface);border-bottom:1px solid rgba(0,212,255,.2);padding:14px 24px;display:flex;align-items:center;gap:16px;}
+  header h1{font-family:'Orbitron',sans-serif;font-size:1.1rem;font-weight:900;background:linear-gradient(135deg,var(--primary),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-transform:uppercase;letter-spacing:2px;}
+  header span{color:var(--muted);font-size:.85rem;}
+  .wrap{max-width:1300px;margin:0 auto;padding:24px;}
+  /* tabs */
+  .tabs{display:flex;gap:4px;margin-bottom:24px;background:var(--surface);padding:4px;border-radius:12px;border:1px solid rgba(0,212,255,.15);flex-wrap:wrap;}
+  .tab{flex:1;min-width:100px;padding:10px 8px;text-align:center;cursor:pointer;border-radius:8px;font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);transition:all .2s;}
+  .tab.active{background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;}
+  /* form card */
+  .card{background:var(--surface);border:1px solid rgba(0,212,255,.2);border-radius:16px;padding:20px;margin-bottom:24px;}
+  .card h2{font-family:'Orbitron',sans-serif;font-size:.9rem;color:var(--primary);text-transform:uppercase;letter-spacing:1px;margin-bottom:16px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;}
+  .field{display:flex;flex-direction:column;gap:5px;}
+  .field label{font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+  .field input,.field select{background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.2);border-radius:8px;padding:8px 12px;color:var(--text);font-size:.9rem;font-family:inherit;outline:none;width:100%;}
+  .field input:focus,.field select:focus{border-color:var(--primary);}
+  .field input[type=color]{height:40px;padding:3px 6px;cursor:pointer;}
+  .field select option{background:var(--surface2);color:var(--text);}
+  .ratchet-preview{margin-top:12px;display:flex;align-items:center;gap:10px;}
+  .ratchet-preview span{color:var(--muted);font-size:.85rem;}
+  .ratchet-name{font-family:'Orbitron',sans-serif;font-size:1.2rem;color:var(--accent);padding:6px 14px;background:rgba(255,215,0,.07);border:1px solid rgba(255,215,0,.3);border-radius:8px;}
+  .actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;}
+  .btn{padding:9px 18px;border:none;border-radius:8px;font-weight:700;font-size:.8rem;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:.5px;transition:all .2s;}
+  .btn:hover{transform:translateY(-1px);opacity:.9;}
+  .btn-primary{background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;}
+  .btn-secondary{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);color:var(--text);}
+  .btn-sm{padding:5px 10px;font-size:.72rem;}
+  .btn-edit{background:rgba(0,212,255,.1);border:1px solid var(--primary);color:var(--primary);}
+  .btn-del{background:rgba(255,68,68,.15);border:1px solid var(--danger);color:var(--danger);}
+  /* table */
+  .tcard{background:var(--surface);border:1px solid rgba(0,212,255,.2);border-radius:16px;overflow:hidden;}
+  .tcard-head{padding:14px 20px;border-bottom:1px solid rgba(0,212,255,.1);display:flex;align-items:center;justify-content:space-between;}
+  .tcard-head h2{font-family:'Orbitron',sans-serif;font-size:.9rem;color:var(--primary);text-transform:uppercase;letter-spacing:1px;}
+  .tcard-head .count{color:var(--muted);font-size:.8rem;}
+  table{width:100%;border-collapse:collapse;}
+  th{padding:10px 14px;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);background:rgba(0,0,0,.25);white-space:nowrap;}
+  td{padding:10px 14px;border-top:1px solid rgba(255,255,255,.05);font-size:.88rem;vertical-align:middle;}
+  tr:hover td{background:rgba(0,212,255,.03);}
+  .swatch{width:22px;height:22px;border-radius:50%;display:inline-block;border:2px solid rgba(255,255,255,.1);vertical-align:middle;}
+  .badge{padding:2px 9px;border-radius:99px;font-size:.68rem;font-weight:700;text-transform:uppercase;display:inline-block;}
+  .b-bx{background:rgba(0,212,255,.15);color:var(--primary);border:1px solid var(--primary);}
+  .b-ux{background:rgba(124,58,237,.2);color:#a78bfa;border:1px solid #7c3aed;}
+  .b-cx{background:rgba(255,215,0,.15);color:var(--accent);border:1px solid var(--accent);}
+  .b-cx_new{background:rgba(255,68,68,.15);color:#ff8080;border:1px solid var(--danger);}
+  .b-tt{background:rgba(255,255,255,.08);color:var(--text);border:1px solid rgba(255,255,255,.15);}
+  .b-hasbro{background:rgba(0,255,136,.12);color:var(--success);border:1px solid var(--success);}
+  .td-act{display:flex;gap:5px;flex-wrap:nowrap;}
+  .empty{text-align:center;padding:48px 20px;color:var(--muted);}
+  /* toast */
+  .toast{position:fixed;bottom:20px;right:20px;padding:12px 20px;border-radius:8px;font-weight:700;font-size:.85rem;z-index:9999;animation:fdin .3s;}
+  .toast.ok{background:var(--success);color:#000;}
+  .toast.err{background:var(--danger);color:#fff;}
+  @keyframes fdin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Beyblade X Admin</h1>
+  <span>Gestione Pezzi &amp; Database</span>
+</header>
+<div class="wrap">
+  <!-- Type Tabs -->
+  <div class="tabs" id="typeTabs">
+    <div class="tab active" onclick="switchTab('blade')">Blade</div>
+    <div class="tab" onclick="switchTab('ratchet')">Ratchet</div>
+    <div class="tab" onclick="switchTab('bit')">Bit</div>
+    <div class="tab" onclick="switchTab('assist_blade')">Assist Blade</div>
+    <div class="tab" onclick="switchTab('lock_chip')">Lock Chip</div>
+    <div class="tab" onclick="switchTab('over_blade')">Over Blade</div>
+  </div>
+
+  <!-- Form -->
+  <div class="card">
+    <h2 id="formTitle">Aggiungi Blade</h2>
+    <form id="partForm" onsubmit="submitForm(event)">
+      <div class="grid">
+        <!-- Name: select for blade/assist/lock/over -->
+        <div class="field" id="fNameSel">
+          <label>Nome</label>
+          <select id="nameSelect"></select>
+        </div>
+        <!-- Name: text for bit -->
+        <div class="field" id="fNameTxt" style="display:none">
+          <label>Nome / Lettere</label>
+          <input type="text" id="nameInput" placeholder="es. F, LF, Q, L, HN" autocomplete="off">
+        </div>
+        <!-- Ratchet specific -->
+        <div class="field" id="fProt" style="display:none">
+          <label>Sporgenze</label>
+          <select id="protSel">
+            <option>1</option><option>2</option><option>3</option><option>4</option>
+            <option>5</option><option>6</option><option>7</option><option>8</option>
+            <option>9</option><option>10</option><option>12</option>
+          </select>
+        </div>
+        <div class="field" id="fHgt" style="display:none">
+          <label>Altezza</label>
+          <select id="hgtSel">
+            <option value="45">45</option><option value="50">50</option>
+            <option value="55">55</option><option value="60" selected>60</option>
+            <option value="65">65</option><option value="70">70</option>
+            <option value="75">75</option><option value="80">80</option>
+            <option value="85">85</option><option value="90">90</option>
+          </select>
+        </div>
+        <!-- Common fields -->
+        <div class="field">
+          <label>Seriale</label>
+          <select id="serialSel"></select>
+        </div>
+        <div class="field">
+          <label>Pack</label>
+          <select id="packSel"></select>
+        </div>
+        <div class="field">
+          <label>Brand</label>
+          <select id="brandSel">
+            <option value="takara_tomy">Takara Tomy</option>
+            <option value="hasbro">Hasbro</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Serie</label>
+          <select id="seriesSel" onchange="updateSerials()">
+            <option value="bx">BX — Beyblade X</option>
+            <option value="ux">UX — Ultimate X</option>
+            <option value="cx">CX — Combo X</option>
+            <option value="cx_new">CX New</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Colore</label>
+          <input type="color" id="colorPick" value="#00d4ff">
+        </div>
+        <div class="field">
+          <label>Immagine URL (opz.)</label>
+          <input type="text" id="imgUrl" placeholder="https://...">
+        </div>
+      </div>
+      <!-- Ratchet name preview -->
+      <div class="ratchet-preview" id="ratchetPrev" style="display:none">
+        <span>Nome ratchet:</span>
+        <span class="ratchet-name" id="ratchetName">3-60</span>
+      </div>
+      <div class="actions">
+        <button type="submit" class="btn btn-primary" id="submitBtn">Aggiungi</button>
+        <button type="button" class="btn btn-secondary" id="cancelBtn" onclick="cancelEdit()" style="display:none">Annulla</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Table -->
+  <div class="tcard">
+    <div class="tcard-head">
+      <h2 id="tableTitle">Blade</h2>
+      <span class="count" id="tableCount"></span>
+    </div>
+    <div id="tableWrap"><div class="empty">Caricamento...</div></div>
+  </div>
+</div>
+
+<script>
+const TYPE_LABELS = {blade:'Blade',ratchet:'Ratchet',bit:'Bit',assist_blade:'Assist Blade',lock_chip:'Lock Chip',over_blade:'Over Blade'};
+const SERIES_LABELS = {bx:'BX',ux:'UX',cx:'CX',cx_new:'CX New'};
+
+// Predefined name choices
+const NAMES = {
+  blade: [
+    'Dran Sword','Hells Scythe','Wizard Arrow','Knight Shield','Shark Edge','Cobalt Dragoon',
+    'Wizard Rod','Knight Lance','Viper Tail','Dran Dagger','Hells Chain','Rhino Horn',
+    'Phoenix Wing','Wyvern Gale','Unicorn Sting','Sphinx Cowl','Hells Hammer','Dran Buster',
+    'Leon Claw','Black Shell','Whale Wave','Leon Crest','Tyranno Beat','Hells Cyclone',
+    'Pandora Box','Crimson Garuda','Galactic Spryzen','Storm Pegasus','Galaxy Pegasus',
+    'Shadow Dranzer','Poison Serpent','Knight Dragon','Dran Dragon','Leon Storm',
+    'Cobalt Valkyrie','Wizard Fafnir','Knight Lancer','Hells Belial','Venom Dran',
+    'Tyrant Dragon','Dark Matter','Astral Spriggan','Imperial Dragon','Savior Valkyrie',
+    'World Spriggan','Prominence Valkyrie','Guilty Longinus','Belial Evo','Sly Fox'
+  ],
+  assist_blade: [
+    'Dran Assist','Cobalt Assist','Hells Assist','Wizard Assist','Knight Assist',
+    'Leon Assist','Shark Assist','Phoenix Assist','Standard Assist','Heavy Assist'
+  ],
+  lock_chip: [
+    'Lock Chip Standard','Lock Chip Light','Lock Chip Heavy',
+    'Lock Chip Attack','Lock Chip Defense','Lock Chip Stamina'
+  ],
+  over_blade: [
+    'Over Blade Standard','Over Blade Attack','Over Blade Defense',
+    'Over Blade Stamina','Over Blade Balance','Over Blade Xtreme'
+  ]
+};
+
+// Serials
+const mkSerials = (prefix, count, start=1) =>
+  Array.from({length:count}, (_,i) => `${prefix}-${String(i+start).padStart(2,'0')}`);
+
+const SERIALS = {
+  bx: ['BX-00', ...mkSerials('BX',45)],
+  ux: mkSerials('UX',20),
+  cx: mkSerials('CX',20),
+  cx_new: mkSerials('CX',20,21),
+};
+
+const PACKS = [
+  '-- Seleziona --',
+  'Starter Pack','Starter Deck Set','Ultimate Deck Set',
+  'Random Booster Vol.1','Random Booster Vol.2','Random Booster Vol.3',
+  'Random Booster Vol.4','Random Booster Vol.5','Random Booster Vol.6',
+  'Random Booster Vol.7','Random Booster Vol.8','Random Booster Vol.9',
+  'Battle Pack','Dual Pack','Triple Pack',
+  'Ultimate Random Booster','Premium Starter Set',
+  'Trial Set','Versus Pack','Special Edition',
+  'Anniversary Set','Collaboration Set','Entry Set',
+];
+
+let activeType = 'blade';
+let editingId = null;
+let parts = [];
+
+function switchTab(type) {
+  activeType = type;
+  editingId = null;
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.classList.toggle('active', Object.keys(TYPE_LABELS)[i] === type);
+  });
+  document.getElementById('tableTitle').textContent = TYPE_LABELS[type];
+  document.getElementById('formTitle').textContent = 'Aggiungi ' + TYPE_LABELS[type];
+  document.getElementById('submitBtn').textContent = 'Aggiungi';
+  document.getElementById('cancelBtn').style.display = 'none';
+  document.getElementById('partForm').reset();
+  document.getElementById('colorPick').value = '#00d4ff';
+  updateFormFields();
+  loadParts();
+}
+
+function updateFormFields() {
+  const isR = activeType === 'ratchet';
+  const isB = activeType === 'bit';
+  const hasSel = !isR && !isB;
+  document.getElementById('fNameSel').style.display = hasSel ? '' : 'none';
+  document.getElementById('fNameTxt').style.display = isB ? '' : 'none';
+  document.getElementById('fProt').style.display = isR ? '' : 'none';
+  document.getElementById('fHgt').style.display = isR ? '' : 'none';
+  document.getElementById('ratchetPrev').style.display = isR ? '' : 'none';
+  if (hasSel) {
+    const opts = (NAMES[activeType] || []).map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+    document.getElementById('nameSelect').innerHTML = opts;
+  }
+  updateSerials();
+  updateRatchetName();
+}
+
+function updateSerials() {
+  const s = document.getElementById('seriesSel').value;
+  const list = SERIALS[s] || SERIALS.bx;
+  document.getElementById('serialSel').innerHTML =
+    '<option value="">-- Seleziona --</option>' +
+    list.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+}
+
+function updateRatchetName() {
+  if (activeType !== 'ratchet') return;
+  const p = document.getElementById('protSel').value;
+  const h = document.getElementById('hgtSel').value;
+  document.getElementById('ratchetName').textContent = p + '-' + h;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function loadParts() {
+  document.getElementById('tableWrap').innerHTML = '<div class="empty">Caricamento...</div>';
+  try {
+    const r = await fetch('/api/parts?type=' + activeType);
+    parts = await r.json();
+    renderTable(parts);
+  } catch(e) {
+    document.getElementById('tableWrap').innerHTML = '<div class="empty">Errore nel caricamento</div>';
+  }
+}
+
+function renderTable(data) {
+  document.getElementById('tableCount').textContent = data.length + ' elementi';
+  if (!data.length) {
+    document.getElementById('tableWrap').innerHTML = '<div class="empty">Nessun pezzo trovato — aggiungine uno con il form sopra.</div>';
+    return;
+  }
+  const rows = data.map((p, i) => {
+    const color = p.color ? `<span class="swatch" style="background:${esc(p.color)}" title="${esc(p.color)}"></span>` : '—';
+    const img = p.image_url ? `<a href="${esc(p.image_url)}" target="_blank" style="color:var(--primary)">🖼</a>` : '—';
+    const extra = activeType === 'ratchet' && p.protrusions != null ? `${p.protrusions}-${p.height}` : esc(p.name);
+    return `<tr>
+      <td><strong>${extra}</strong></td>
+      <td>${esc(p.serial)||'—'}</td>
+      <td>${esc(p.pack)||'—'}</td>
+      <td><span class="badge b-${esc(p.brand === 'hasbro' ? 'hasbro' : 'tt')}">${p.brand === 'hasbro' ? 'Hasbro' : 'Takara Tomy'}</span></td>
+      <td><span class="badge b-${esc(p.series)}">${SERIES_LABELS[p.series]||esc(p.series)}</span></td>
+      <td>${color}</td>
+      <td>${img}</td>
+      <td class="td-act">
+        <button class="btn btn-sm btn-edit" onclick="editPart(${i})">Modifica</button>
+        <button class="btn btn-sm btn-del" onclick="deletePart('${esc(p.id)}')">Elimina</button>
+      </td>
+    </tr>`;
+  }).join('');
+  document.getElementById('tableWrap').innerHTML = `
+    <table>
+      <thead><tr><th>Nome</th><th>Seriale</th><th>Pack</th><th>Brand</th><th>Serie</th><th>Colore</th><th>Img</th><th>Azioni</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function editPart(idx) {
+  const p = parts[idx];
+  if (!p) return;
+  editingId = p.id;
+  document.getElementById('formTitle').textContent = 'Modifica ' + TYPE_LABELS[activeType];
+  document.getElementById('submitBtn').textContent = 'Aggiorna';
+  document.getElementById('cancelBtn').style.display = '';
+  if (activeType === 'ratchet') {
+    document.getElementById('protSel').value = String(p.protrusions || 3);
+    document.getElementById('hgtSel').value = String(p.height || 60);
+    updateRatchetName();
+  } else if (activeType === 'bit') {
+    document.getElementById('nameInput').value = p.name;
+  } else {
+    document.getElementById('nameSelect').value = p.name;
+  }
+  document.getElementById('seriesSel').value = p.series || 'bx';
+  updateSerials();
+  document.getElementById('serialSel').value = p.serial || '';
+  document.getElementById('packSel').value = p.pack || '';
+  document.getElementById('brandSel').value = p.brand || 'takara_tomy';
+  document.getElementById('colorPick').value = p.color || '#00d4ff';
+  document.getElementById('imgUrl').value = p.image_url || '';
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function cancelEdit() {
+  editingId = null;
+  document.getElementById('partForm').reset();
+  document.getElementById('colorPick').value = '#00d4ff';
+  document.getElementById('formTitle').textContent = 'Aggiungi ' + TYPE_LABELS[activeType];
+  document.getElementById('submitBtn').textContent = 'Aggiungi';
+  document.getElementById('cancelBtn').style.display = 'none';
+  updateFormFields();
+}
+
+async function submitForm(e) {
+  e.preventDefault();
+  let name, protrusions = null, height = null;
+  if (activeType === 'ratchet') {
+    protrusions = parseInt(document.getElementById('protSel').value);
+    height = parseInt(document.getElementById('hgtSel').value);
+    name = protrusions + '-' + height;
+  } else if (activeType === 'bit') {
+    name = document.getElementById('nameInput').value.trim();
+  } else {
+    name = document.getElementById('nameSelect').value;
+  }
+  if (!name) { toast('Il nome è obbligatorio', false); return; }
+  const payload = {
+    part_type: activeType, name,
+    serial: document.getElementById('serialSel').value || null,
+    pack: document.getElementById('packSel').value || null,
+    brand: document.getElementById('brandSel').value,
+    series: document.getElementById('seriesSel').value,
+    color: document.getElementById('colorPick').value || null,
+    image_url: document.getElementById('imgUrl').value.trim() || null,
+    protrusions, height,
+  };
+  try {
+    const url = editingId ? `/api/admin/parts/${editingId}` : '/api/admin/parts';
+    const method = editingId ? 'PUT' : 'POST';
+    const r = await fetch(url, {
+      method, headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) { const t = await r.json(); throw new Error(t.error || r.statusText); }
+    toast(editingId ? 'Pezzo aggiornato!' : 'Pezzo aggiunto!', true);
+    cancelEdit();
+    loadParts();
+  } catch(err) {
+    toast('Errore: ' + err.message, false);
+  }
+}
+
+async function deletePart(id) {
+  if (!confirm('Eliminare questo pezzo definitivamente?')) return;
+  try {
+    const r = await fetch('/api/admin/parts/' + id, {method:'DELETE'});
+    if (!r.ok) throw new Error('Errore eliminazione');
+    toast('Pezzo eliminato', true);
+    loadParts();
+  } catch(err) {
+    toast('Errore: ' + err.message, false);
+  }
+}
+
+function toast(msg, ok) {
+  document.querySelectorAll('.toast').forEach(t => t.remove());
+  const el = document.createElement('div');
+  el.className = 'toast ' + (ok ? 'ok' : 'err');
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+// Pack dropdown init
+function initPacks() {
+  document.getElementById('packSel').innerHTML =
+    PACKS.map(p => `<option value="${p === '-- Seleziona --' ? '' : esc(p)}">${esc(p)}</option>`).join('');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('protSel').addEventListener('change', updateRatchetName);
+  document.getElementById('hgtSel').addEventListener('change', updateRatchetName);
+  initPacks();
+  switchTab('blade');
+});
 </script>
 </body>
 </html>"##.to_string()
