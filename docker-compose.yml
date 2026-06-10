@@ -1,0 +1,11 @@
+services:
+  backend:
+    build: .
+    container_name: beyblade-x-backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7878:7878"   # solo localhost, non esposto pubblicamente
+    volumes:
+      - ${HOME}/.beyblade-x-app:/root/.beyblade-x-app
+    env_file:
+      - .env
