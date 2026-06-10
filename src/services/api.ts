@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { Blader, Tournament, TournamentDetail, Arena, CustomBey, BattleRecord } from '../types';
+import { Blader, Tournament, TournamentDetail, Arena, CustomBey, BattleRecord, Part } from '../types';
 
 export const isTauri = (): boolean => {
   return typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__ !== undefined;
@@ -135,6 +135,32 @@ export const api = {
     return request<CustomBey[]>('/api/custom-beys');
   },
 
+  getParts: async (filters?: { type?: string; series?: string; brand?: string }): Promise<Part[]> => {
+    const params = new URLSearchParams();
+    if (filters?.type) params.set('type', filters.type);
+    if (filters?.series) params.set('series', filters.series);
+    if (filters?.brand) params.set('brand', filters.brand);
+    const qs = params.toString();
+    return request<Part[]>(`/api/parts${qs ? '?' + qs : ''}`);
+  },
+
+  getBladerParts: async (bladerId: string): Promise<string[]> => {
+    return request<string[]>(`/api/bladers/${bladerId}/parts`);
+  },
+
+  addBladerPart: async (bladerId: string, partId: string): Promise<void> => {
+    return request<void>(`/api/bladers/${bladerId}/parts`, {
+      method: 'POST',
+      body: JSON.stringify({ part_id: partId }),
+    });
+  },
+
+  removeBladerPart: async (bladerId: string, partId: string): Promise<void> => {
+    return request<void>(`/api/bladers/${bladerId}/parts/${partId}`, {
+      method: 'DELETE',
+    });
+  },
+
   createCustomBey: async (args: {
     blader_id?: string;
     name: string;
@@ -144,6 +170,12 @@ export const api = {
     type_class: string;
     color?: string;
     stats: string;
+    blade_part_id?: string;
+    ratchet_part_id?: string;
+    bit_part_id?: string;
+    assist_blade_part_id?: string;
+    lock_chip_part_id?: string;
+    over_blade_part_id?: string;
   }): Promise<CustomBey> => {
     if (getBackendMode() === 'local') {
       return invoke<CustomBey>('create_custom_bey', { args });
@@ -304,6 +336,13 @@ export const api = {
     }
     return request<void>(`/api/custom-arenas/${id}`, {
       method: 'DELETE',
+    });
+  },
+
+  loginBlader: async (name: string, password: string): Promise<Blader> => {
+    return request<Blader>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ name, password }),
     });
   },
 };

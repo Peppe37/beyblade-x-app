@@ -1,19 +1,22 @@
 import { api } from '../services/api';
 import { create } from 'zustand';
-import { Blader, Tournament, TournamentDetail, Lang, CustomBey, Arena } from '../types';
+import { Blader, Tournament, TournamentDetail, Lang, CustomBey, Arena, Part } from '../types';
 
 // ─── Settings Store ──────────────────────────────────────────────────────────
 
 interface SettingsStore {
   lang: Lang;
   localIp: string;
+  currentBladerId: string | null;
   setLang: (lang: Lang) => void;
   fetchLocalIp: () => Promise<void>;
+  setCurrentBlader: (id: string | null) => void;
 }
 
 export const useSettings = create<SettingsStore>((set) => ({
   lang: (localStorage.getItem('lang') as Lang) || 'it',
   localIp: '',
+  currentBladerId: localStorage.getItem('current_blader_id'),
   setLang: (lang) => {
     localStorage.setItem('lang', lang);
     set({ lang });
@@ -25,6 +28,11 @@ export const useSettings = create<SettingsStore>((set) => ({
     } catch {
       set({ localIp: '127.0.0.1' });
     }
+  },
+  setCurrentBlader: (id) => {
+    if (id) localStorage.setItem('current_blader_id', id);
+    else localStorage.removeItem('current_blader_id');
+    set({ currentBladerId: id });
   },
 }));
 
@@ -228,5 +236,53 @@ export const useArenas = create<ArenasStore>((set) => ({
   deleteCustomArena: async (id) => {
     await api.deleteCustomArena(id);
     set((s) => ({ customArenas: s.customArenas.filter((a) => a.id !== id) }));
+  },
+}));
+
+// ─── Parts Store ──────────────────────────────────────────────────────────────
+
+interface PartsStore {
+  parts: Part[];
+  ownedPartIds: Set<string>;
+  loading: boolean;
+  fetchParts: (filters?: { type?: string; series?: string }) => Promise<void>;
+  fetchOwnedParts: (bladerId: string) => Promise<void>;
+  toggleOwnedPart: (bladerId: string, partId: string) => Promise<void>;
+}
+
+export const useParts = create<PartsStore>((set, get) => ({
+  parts: [],
+  ownedPartIds: new Set(),
+  loading: false,
+
+  fetchParts: async (filters) => {
+    set({ loading: true });
+    try {
+      const parts = await api.getParts(filters);
+      set({ parts, loading: false });
+    } catch (e) {
+      console.error('fetchParts error:', e);
+      set({ loading: false });
+    }
+  },
+
+  fetchOwnedParts: async (bladerId) => {
+    try {
+      const ids = await api.getBladerParts(bladerId);
+      set({ ownedPartIds: new Set(ids) });
+    } catch (e) {
+      console.error('fetchOwnedParts error:', e);
+    }
+  },
+
+  toggleOwnedPart: async (bladerId, partId) => {
+    const owned = get().ownedPartIds;
+    if (owned.has(partId)) {
+      await api.removeBladerPart(bladerId, partId);
+      set({ ownedPartIds: new Set([...owned].filter(id => id !== partId)) });
+    } else {
+      await api.addBladerPart(bladerId, partId);
+      set({ ownedPartIds: new Set([...owned, partId]) });
+    }
   },
 }));

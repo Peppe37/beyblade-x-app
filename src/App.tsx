@@ -9,6 +9,7 @@ import Tournaments from './pages/Tournaments';
 import TournamentDetail from './pages/TournamentDetail';
 import Settings from './pages/Settings';
 import Versus from './pages/Versus';
+import Officina from './pages/Officina';
 
 import { useSettings, useToast } from './store';
 import { CheckCircle, XCircle, Info, Database, Globe, ArrowRight, ShieldAlert } from 'lucide-react';
@@ -266,6 +267,7 @@ export default function App() {
             <Route path="/tournaments/:id" element={<TournamentDetail />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/versus" element={<Versus />} />
+            <Route path="/officina" element={<Officina />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Layout>

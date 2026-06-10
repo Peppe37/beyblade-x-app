@@ -229,6 +229,12 @@ pub struct CreateCustomBeyArgs {
     pub type_class: String,
     pub color: Option<String>,
     pub stats: String,
+    pub blade_part_id: Option<String>,
+    pub ratchet_part_id: Option<String>,
+    pub bit_part_id: Option<String>,
+    pub assist_blade_part_id: Option<String>,
+    pub lock_chip_part_id: Option<String>,
+    pub over_blade_part_id: Option<String>,
 }
 
 #[tauri::command]
@@ -246,6 +252,12 @@ pub async fn create_custom_bey(
         &args.type_class,
         args.color.as_deref(),
         &args.stats,
+        args.blade_part_id.as_deref(),
+        args.ratchet_part_id.as_deref(),
+        args.bit_part_id.as_deref(),
+        args.assist_blade_part_id.as_deref(),
+        args.lock_chip_part_id.as_deref(),
+        args.over_blade_part_id.as_deref(),
     )
     .map(|b| json!(b))
     .map_err(|e| e.to_string())

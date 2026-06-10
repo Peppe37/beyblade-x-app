@@ -85,6 +85,12 @@ pub struct CustomBey {
     pub blade: String,
     pub ratchet: String,
     pub bit: String,
+    pub blade_part_id: Option<String>,
+    pub ratchet_part_id: Option<String>,
+    pub bit_part_id: Option<String>,
+    pub assist_blade_part_id: Option<String>,
+    pub lock_chip_part_id: Option<String>,
+    pub over_blade_part_id: Option<String>,
     pub type_class: String,
     pub color: Option<String>,
     pub stats: String,
@@ -253,6 +259,21 @@ impl Database {
         let _ = self.conn.execute("ALTER TABLE bladers ADD COLUMN beys TEXT DEFAULT '[]'", []);
         // Migration to add password column if missing
         let _ = self.conn.execute("ALTER TABLE bladers ADD COLUMN password TEXT NOT NULL DEFAULT 'changeme'", []);
+        // Migration: user parts collection
+        let _ = self.conn.execute_batch("
+            CREATE TABLE IF NOT EXISTS user_parts (
+                blader_id TEXT NOT NULL,
+                part_id TEXT NOT NULL,
+                PRIMARY KEY (blader_id, part_id)
+            );
+        ");
+        // Migration: add part ID refs to custom_beys
+        let _ = self.conn.execute("ALTER TABLE custom_beys ADD COLUMN blade_part_id TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE custom_beys ADD COLUMN ratchet_part_id TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE custom_beys ADD COLUMN bit_part_id TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE custom_beys ADD COLUMN assist_blade_part_id TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE custom_beys ADD COLUMN lock_chip_part_id TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE custom_beys ADD COLUMN over_blade_part_id TEXT", []);
 
         Ok(())
     }
@@ -366,7 +387,11 @@ impl Database {
     // ─── Custom Beys ─────────────────────────────────────────────────────────
 
     pub fn get_custom_beys(&self) -> Result<Vec<CustomBey>> {
-        let mut stmt = self.conn.prepare("SELECT id, blader_id, name, blade, ratchet, bit, type_class, color, stats, created_at FROM custom_beys")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT id, blader_id, name, blade, ratchet, bit, type_class, color, stats, created_at,
+             blade_part_id, ratchet_part_id, bit_part_id, assist_blade_part_id, lock_chip_part_id, over_blade_part_id
+             FROM custom_beys"
+        )?;
         let beys = stmt.query_map([], |row| {
             Ok(CustomBey {
                 id: row.get(0)?,
@@ -379,6 +404,12 @@ impl Database {
                 color: row.get(7)?,
                 stats: row.get(8)?,
                 created_at: row.get(9)?,
+                blade_part_id: row.get(10)?,
+                ratchet_part_id: row.get(11)?,
+                bit_part_id: row.get(12)?,
+                assist_blade_part_id: row.get(13)?,
+                lock_chip_part_id: row.get(14)?,
+                over_blade_part_id: row.get(15)?,
             })
         })?
         .filter_map(|r| r.ok())
@@ -396,12 +427,21 @@ impl Database {
         type_class: &str,
         color: Option<&str>,
         stats: &str,
+        blade_part_id: Option<&str>,
+        ratchet_part_id: Option<&str>,
+        bit_part_id: Option<&str>,
+        assist_blade_part_id: Option<&str>,
+        lock_chip_part_id: Option<&str>,
+        over_blade_part_id: Option<&str>,
     ) -> Result<CustomBey> {
         let id = uuid::Uuid::new_v4().to_string();
         let created_at = Utc::now().to_rfc3339();
         self.conn.execute(
-            "INSERT INTO custom_beys (id, blader_id, name, blade, ratchet, bit, type_class, color, stats, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
-            rusqlite::params![id, blader_id, name, blade, ratchet, bit, type_class, color, stats, created_at],
+            "INSERT INTO custom_beys (id, blader_id, name, blade, ratchet, bit, type_class, color, stats, created_at,
+             blade_part_id, ratchet_part_id, bit_part_id, assist_blade_part_id, lock_chip_part_id, over_blade_part_id)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+            rusqlite::params![id, blader_id, name, blade, ratchet, bit, type_class, color, stats, created_at,
+                blade_part_id, ratchet_part_id, bit_part_id, assist_blade_part_id, lock_chip_part_id, over_blade_part_id],
         )?;
 
         let owner_name = if let Some(bid) = blader_id {
@@ -424,6 +464,12 @@ impl Database {
             blade: blade.to_string(),
             ratchet: ratchet.to_string(),
             bit: bit.to_string(),
+            blade_part_id: blade_part_id.map(|s| s.to_string()),
+            ratchet_part_id: ratchet_part_id.map(|s| s.to_string()),
+            bit_part_id: bit_part_id.map(|s| s.to_string()),
+            assist_blade_part_id: assist_blade_part_id.map(|s| s.to_string()),
+            lock_chip_part_id: lock_chip_part_id.map(|s| s.to_string()),
+            over_blade_part_id: over_blade_part_id.map(|s| s.to_string()),
             type_class: type_class.to_string(),
             color: color.map(|s| s.to_string()),
             stats: stats.to_string(),
@@ -433,6 +479,34 @@ impl Database {
 
     pub fn delete_custom_bey(&self, id: &str) -> Result<()> {
         self.conn.execute("DELETE FROM custom_beys WHERE id=?1", rusqlite::params![id])?;
+        Ok(())
+    }
+
+    // ─── User Parts (Officina) ────────────────────────────────────────────────
+
+    pub fn get_blader_parts(&self, blader_id: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT part_id FROM user_parts WHERE blader_id=?1"
+        )?;
+        let ids = stmt.query_map(rusqlite::params![blader_id], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(ids)
+    }
+
+    pub fn add_blader_part(&self, blader_id: &str, part_id: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO user_parts (blader_id, part_id) VALUES (?1, ?2)",
+            rusqlite::params![blader_id, part_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_blader_part(&self, blader_id: &str, part_id: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM user_parts WHERE blader_id=?1 AND part_id=?2",
+            rusqlite::params![blader_id, part_id],
+        )?;
         Ok(())
     }
 

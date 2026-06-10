@@ -22,9 +22,30 @@ export interface CustomBey {
   blade: string;
   ratchet: string;
   bit: string;
+  blade_part_id?: string;
+  ratchet_part_id?: string;
+  bit_part_id?: string;
+  assist_blade_part_id?: string;
+  lock_chip_part_id?: string;
+  over_blade_part_id?: string;
   type_class: string;
   color?: string;
   stats: string; // JSON string
+  created_at: string;
+}
+
+export interface Part {
+  id: string;
+  part_type: string; // blade | ratchet | bit | assist_blade | lock_chip | over_blade
+  name: string;
+  serial: string;
+  pack: string;
+  brand: string;
+  series: string;
+  color?: string;
+  image_url?: string;
+  protrusions?: number;
+  height?: number;
   created_at: string;
 }
 
@@ -297,6 +318,7 @@ export const t: Record<Lang, Record<string, string>> = {
     select_bladers: 'Seleziona Blader',
     connect_mobile: 'Connetti Dispositivi',
     share_url: 'URL per i giocatori',
+    officina: 'Officina',
   },
   en: {
     home: 'Home',
@@ -344,5 +366,6 @@ export const t: Record<Lang, Record<string, string>> = {
     select_bladers: 'Select Bladers',
     connect_mobile: 'Connect Devices',
     share_url: 'Player URL',
+    officina: 'Workshop',
   }
 };

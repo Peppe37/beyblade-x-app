@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import {
-  Home, Users, Disc3, MapPin, Trophy, Settings, Wifi, Swords
+  Home, Users, Disc3, MapPin, Trophy, Settings, Wifi, Swords, Wrench
 } from 'lucide-react';
 import { useSettings } from '../../store';
 import { t } from '../../types';
@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: '/', icon: Home, key: 'home' },
   { to: '/bladers', icon: Users, key: 'bladers' },
   { to: '/beys', icon: Disc3, key: 'beys' },
+  { to: '/officina', icon: Wrench, key: 'officina' },
   { to: '/arenas', icon: MapPin, key: 'arenas' },
   { to: '/versus', icon: Swords, key: 'versus' },
   { to: '/tournaments', icon: Trophy, key: 'tournaments' },

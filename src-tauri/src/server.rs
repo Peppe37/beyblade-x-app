@@ -206,6 +206,9 @@ pub async fn start_server(db: Arc<Mutex<Database>>, ws_state: Arc<WsState>) {
         // Public parts API
         .route("/api/parts", get(get_parts_api))
         .route("/api/parts/:id", get(get_part_api))
+        // User parts (officina)
+        .route("/api/bladers/:id/parts", get(get_blader_parts_api).post(add_blader_part_api))
+        .route("/api/bladers/:id/parts/:part_id", delete(remove_blader_part_api))
         // Admin panel
         .route("/admin", get(admin_page))
         .route("/api/admin/parts", post(create_part_api))
@@ -389,6 +392,12 @@ struct CreateCustomBeyRequest {
     type_class: String,
     color: Option<String>,
     stats: String,
+    blade_part_id: Option<String>,
+    ratchet_part_id: Option<String>,
+    bit_part_id: Option<String>,
+    assist_blade_part_id: Option<String>,
+    lock_chip_part_id: Option<String>,
+    over_blade_part_id: Option<String>,
 }
 
 async fn create_custom_bey_api(
@@ -405,6 +414,12 @@ async fn create_custom_bey_api(
         &payload.type_class,
         payload.color.as_deref(),
         &payload.stats,
+        payload.blade_part_id.as_deref(),
+        payload.ratchet_part_id.as_deref(),
+        payload.bit_part_id.as_deref(),
+        payload.assist_blade_part_id.as_deref(),
+        payload.lock_chip_part_id.as_deref(),
+        payload.over_blade_part_id.as_deref(),
     ) {
         Ok(bey) => (axum::http::StatusCode::CREATED, Json(bey)).into_response(),
         Err(err) => (
@@ -1228,6 +1243,45 @@ async fn get_part_api(
     match db.get_part(&id) {
         Ok(Some(p)) => (axum::http::StatusCode::OK, Json(p)).into_response(),
         Ok(None) => (axum::http::StatusCode::NOT_FOUND, Json(json!({ "error": "Not found" }))).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+// ─── User Parts (Officina) ───────────────────────────────────────────────────
+
+async fn get_blader_parts_api(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.get_blader_parts(&id) {
+        Ok(ids) => (axum::http::StatusCode::OK, Json(ids)).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct AddPartBody { part_id: String }
+
+async fn add_blader_part_api(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<AddPartBody>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.add_blader_part(&id, &body.part_id) {
+        Ok(_) => (axum::http::StatusCode::OK, Json(json!({ "status": "ok" }))).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+async fn remove_blader_part_api(
+    State(state): State<AppState>,
+    Path((id, part_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match db.remove_blader_part(&id, &part_id) {
+        Ok(_) => (axum::http::StatusCode::OK, Json(json!({ "status": "ok" }))).into_response(),
         Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
     }
 }
