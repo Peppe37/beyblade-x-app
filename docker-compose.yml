@@ -8,8 +8,8 @@ services:
     env_file:
       - .env
     networks:
-      - proxy-network
+      - npm-prod_default
 
 networks:
-  proxy-network:
+  npm-prod_default:
     external: true
