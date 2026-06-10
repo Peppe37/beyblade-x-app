@@ -1,0 +1,28 @@
+[package]
+name = "beyblade-x-app"
+version = "0.1.0"
+description = "Beyblade X Local Tournament Manager"
+authors = ["Beyblade X App"]
+edition = "2021"
+
+[lib]
+name = "beyblade_x_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+rand = "0.8"
+local-ip-address = "0.6"
+futures-util = "0.3"
