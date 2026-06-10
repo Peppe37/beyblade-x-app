@@ -26,6 +26,7 @@ RUN mkdir -p src && \
 RUN rm -rf src
 
 # Full build
+COPY src-tauri/icons ./icons/
 COPY src-tauri/src ./src/
 RUN touch src/main.rs && cargo build --release
 
