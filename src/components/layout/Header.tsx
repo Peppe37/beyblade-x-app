@@ -1,5 +1,5 @@
 import { useLocation } from 'react-router-dom';
-import { Globe } from 'lucide-react';
+import { Globe, Menu } from 'lucide-react';
 import { useSettings } from '../../store';
 import { t } from '../../types';
 
@@ -12,7 +12,11 @@ const PAGE_TITLES: Record<string, string> = {
   '/settings': 'settings',
 };
 
-export default function Header() {
+interface HeaderProps {
+  onToggleSidebar: () => void;
+}
+
+export default function Header({ onToggleSidebar }: HeaderProps) {
   const { lang, setLang } = useSettings();
   const location = useLocation();
   const tr = t[lang];
@@ -25,6 +29,13 @@ export default function Header() {
 
   return (
     <header className="header">
+      <button
+        className="hamburger-btn"
+        onClick={onToggleSidebar}
+        aria-label="Toggle menu"
+      >
+        <Menu size={22} />
+      </button>
       <div className="header-title">{title}</div>
       <div className="header-right">
         <button

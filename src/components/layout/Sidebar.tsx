@@ -16,7 +16,12 @@ const NAV_ITEMS = [
   { to: '/tournaments', icon: Trophy, key: 'tournaments' },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { lang } = useSettings();
   const tr = t[lang];
   const serverUrl = getRemoteUrl();
@@ -31,7 +36,12 @@ export default function Sidebar() {
   }, [serverUrl]);
 
   return (
-    <aside className="sidebar">
+    <>
+    <div
+      className={`sidebar-overlay${isOpen ? ' sidebar-overlay--visible' : ''}`}
+      onClick={onClose}
+    />
+    <aside className={`sidebar${isOpen ? ' sidebar--open' : ''}`} onClick={e => e.stopPropagation()}>
       {/* Logo */}
       <div className="sidebar-logo">
         <div className="sidebar-logo-icon">
@@ -51,6 +61,7 @@ export default function Sidebar() {
             to={to}
             end={to === '/'}
             className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+            onClick={onClose}
           >
             <div className="nav-indicator" />
             <span className="nav-item-icon"><Icon size={18} /></span>
@@ -71,12 +82,13 @@ export default function Sidebar() {
             <span style={{ color: 'var(--success)', fontFamily: 'Orbitron', fontSize: '0.7rem', wordBreak: 'break-all' }}>{displayHost}</span>
           </div>
         </div>
-        <NavLink to="/settings" className="nav-item" style={{ marginTop: 4 }}>
+        <NavLink to="/settings" className="nav-item" style={{ marginTop: 4 }} onClick={onClose}>
           <div className="nav-indicator" />
           <span className="nav-item-icon"><Settings size={18} /></span>
           <span className="nav-item-label">{tr.settings}</span>
         </NavLink>
       </div>
     </aside>
+    </>
   );
 }

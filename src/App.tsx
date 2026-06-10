@@ -82,6 +82,10 @@ export default function App() {
     connectToBackend('http://127.0.0.1:7878', true);
   };
 
+  const handlePresetConnect = () => {
+    connectToBackend('https://beyblade.printingarage.it', true);
+  };
+
   const handleRemoteConnect = (e: React.FormEvent) => {
     e.preventDefault();
     connectToBackend(remoteUrl, false);
@@ -132,6 +136,26 @@ export default function App() {
             </h2>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 20 }}>
+              {/* Option 0: Preset remote server */}
+              <div className="card card-interactive" style={{ padding: 24, cursor: 'pointer', textAlign: 'left', borderColor: 'rgba(0,255,136,0.3)' }} onClick={handlePresetConnect} id="btn-select-preset">
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+                  <div style={{ background: 'rgba(0,255,136,0.1)', color: 'var(--success)', padding: 12, borderRadius: 12 }}>
+                    <Globe size={24} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{ fontFamily: 'Orbitron', fontSize: '0.9rem', color: 'var(--success)', margin: '0 0 6px 0' }}>
+                      beyblade.printingarage.it
+                    </h3>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.4, margin: 0 }}>
+                      {lang === 'it'
+                        ? 'Connetti al server principale online.'
+                        : 'Connect to the main online server.'}
+                    </p>
+                  </div>
+                  <ArrowRight size={20} style={{ alignSelf: 'center', color: 'var(--text-muted)' }} />
+                </div>
+              </div>
+
               {/* Option 1: Local Backend Server */}
               <div className="card card-interactive" style={{ padding: 24, cursor: 'pointer', textAlign: 'left' }} onClick={handleLocalConnect} id="btn-select-local">
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>

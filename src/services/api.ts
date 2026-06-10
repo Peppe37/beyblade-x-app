@@ -228,6 +228,7 @@ export const api = {
   },
 
   addMatchResult: async (args: {
+    tournament_id: string;
     match_id: string;
     winner_id: string;
     blader1_points: number;
@@ -244,7 +245,7 @@ export const api = {
     if (getBackendMode() === 'local') {
       return invoke<void>('add_match_result', { args: payload });
     }
-    return request<void>(`/api/tournaments/${args.match_id}/match-result`, {
+    return request<void>(`/api/tournaments/${args.tournament_id}/match-result`, {
       method: 'POST',
       body: JSON.stringify({ args: payload }),
     });

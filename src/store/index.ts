@@ -107,6 +107,7 @@ interface TournamentsStore {
   deleteTournament: (id: string) => Promise<void>;
   resetTournament: (id: string) => Promise<void>;
   addMatchResult: (args: {
+    tournament_id: string;
     match_id: string;
     winner_id: string;
     blader1_points: number;

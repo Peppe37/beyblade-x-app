@@ -177,6 +177,27 @@ body {
   flex-direction: column;
   z-index: 100;
   padding: var(--space-lg) 0;
+  transition: transform 0.3s ease;
+}
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 99;
+}
+
+.hamburger-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
 }
 
 .sidebar-logo {
@@ -1159,7 +1180,11 @@ tbody td {
 /* ─── Responsive ─────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .sidebar { transform: translateX(-100%); }
+  .sidebar.sidebar--open { transform: translateX(0); }
+  .sidebar-overlay.sidebar-overlay--visible { display: block; }
+  .hamburger-btn { display: flex; }
   .main-content { margin-left: 0; }
+  .grid-2 { grid-template-columns: 1fr; }
   .grid-3, .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .page-inner { padding: var(--space-md); }
 }

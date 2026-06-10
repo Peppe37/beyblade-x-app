@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { useSettings } from '../store';
 import { t } from '../types';
-import { Save, Globe, Wifi, QrCode, Copy, Check, Database } from 'lucide-react';
+import { Globe, Wifi, QrCode, Copy, Check, Database } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { getBackendMode, getRemoteUrl } from '../services/api';
 
 export default function Settings() {
   const { lang, setLang, localIp } = useSettings();
   const tr = t[lang];
-  const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<'home' | 'lobby'>('home');
 
@@ -17,11 +16,6 @@ export default function Settings() {
   const homeUrl = backendMode === 'remote' ? `${remoteUrl.replace(/\/$/, '')}/` : `http://${localIp || '127.0.0.1'}:7878/`;
   const lobbyUrl = backendMode === 'remote' ? `${remoteUrl.replace(/\/$/, '')}/lobby` : `http://${localIp || '127.0.0.1'}:7878/lobby`;
   const currentUrl = activeTab === 'home' ? homeUrl : lobbyUrl;
-
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
 
   const copyUrl = async () => {
     try {
@@ -116,11 +110,6 @@ export default function Settings() {
             </p>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button className="btn btn-primary" onClick={handleSave}>
-              <Save size={16} /> {saved ? (lang === 'it' ? 'Salvato!' : 'Saved!') : tr.save || 'Salva'}
-            </button>
-          </div>
         </div>
 
         {/* Right Column: QR Code Connection */}

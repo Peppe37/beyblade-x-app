@@ -215,6 +215,7 @@ export default function TournamentDetail() {
         const finalWinnerId = newScore1 >= tournament.point_threshold ? b1Id : b2Id;
         const lastFinishType = newRound.round_type === 'finish' ? (newRound.finish_type || 'spin') : newRound.round_type;
         await addMatchResult({
+          tournament_id: id!,
           match_id: battleModal.id,
           winner_id: finalWinnerId,
           blader1_points: newScore1,
