@@ -1922,6 +1922,7 @@ fn mobile_lobby_html() -> String {
       <div class="tab active" onclick="showTab('players')">Online</div>
       <div class="tab" onclick="showTab('tournaments')">Tornei</div>
       <div class="tab" onclick="showTab('beys')">Beys</div>
+      <div class="tab" onclick="showTab('officina')">🔧 Officina</div>
       <div class="tab" onclick="showTab('profile')">Profilo</div>
       <div class="tab" onclick="showTab('history')">Attività</div>
     </div>
@@ -2033,6 +2034,112 @@ fn mobile_lobby_html() -> String {
         <h2>Cronologia Battaglie</h2>
         <div id="profileMatchesHistory" style="display:flex;flex-direction:column;gap:10px;margin-top:12px;max-height:300px;overflow-y:auto">
           <p style="text-align:center;color:var(--muted);font-size:0.85rem">Nessuna battaglia registrata.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Officina Tab -->
+    <div id="officinaTab" class="tab-content">
+      <!-- Sub-nav -->
+      <div class="tabs" style="margin-bottom:14px">
+        <div class="tab active" id="offTabMagazzino" onclick="showOfficinaTab('magazzino')">🔧 Magazzino</div>
+        <div class="tab" id="offTabCrea" onclick="showOfficinaTab('crea')">✨ Crea Bey</div>
+      </div>
+
+      <!-- MAGAZZINO PANEL -->
+      <div id="offMagazzinoPanel">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+            <div>
+              <h2 style="margin:0">Il Mio Magazzino</h2>
+              <p style="font-size:0.75rem;color:var(--muted);margin:2px 0 0">Tocca un pezzo per aggiungerlo/rimuoverlo dalla tua collezione</p>
+            </div>
+            <span id="offOwnedCount" style="font-size:0.75rem;font-family:'Orbitron';color:var(--success)">0 pezzi</span>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+            <input class="form-input" id="offSearch" placeholder="Cerca..." oninput="renderMagazzino()" style="flex:1;min-width:140px;font-size:0.85rem;padding:8px 12px">
+            <select class="form-select" id="offTypeFilter" onchange="renderMagazzino()" style="width:auto;font-size:0.82rem;padding:8px 10px">
+              <option value="all">Tutti</option>
+              <option value="blade">Blade</option>
+              <option value="ratchet">Ratchet</option>
+              <option value="bit">Bit</option>
+              <option value="assist_blade">Assist Blade</option>
+              <option value="lock_chip">Lock Chip</option>
+              <option value="over_blade">Over Blade</option>
+            </select>
+            <button id="offOnlyMineBtn" onclick="toggleOffOnlyMine()" style="padding:8px 12px;font-size:0.75rem;font-family:'Orbitron';border-radius:8px;border:1px solid rgba(0,212,255,0.3);background:transparent;color:var(--muted);cursor:pointer;white-space:nowrap">Solo miei</button>
+          </div>
+          <div id="offPartsContainer" style="display:flex;flex-direction:column;gap:8px">
+            <div style="text-align:center;padding:24px;color:var(--muted);font-size:0.85rem">Caricamento pezzi...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CREA BEY PANEL -->
+      <div id="offCreaPanel" style="display:none">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h2 style="margin:0">Crea Bey da Pezzi</h2>
+            <label style="display:flex;align-items:center;gap:6px;font-size:0.75rem;color:var(--muted);cursor:pointer;user-select:none">
+              <input type="checkbox" id="offOnlyMineCheck" onchange="offPopulateSelects()">
+              Solo i miei
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Nome Beyblade *</label>
+            <input class="form-input" id="offCbName" placeholder="Es. Buster X">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Blade *</label>
+            <select class="form-select" id="offCbBlade" onchange="offUpdateBlade()">
+              <option value="">-- Seleziona Blade --</option>
+            </select>
+          </div>
+
+          <div class="form-group" id="offAssistBladeGroup" style="display:none">
+            <label class="form-label">Assist Blade</label>
+            <select class="form-select" id="offCbAssistBlade">
+              <option value="">-- Seleziona --</option>
+            </select>
+          </div>
+
+          <div class="form-group" id="offOverBladeGroup" style="display:none">
+            <label class="form-label">Over Blade</label>
+            <select class="form-select" id="offCbOverBlade">
+              <option value="">-- Seleziona --</option>
+            </select>
+          </div>
+
+          <div class="form-group" id="offLockChipGroup" style="display:none">
+            <label class="form-label">Lock Chip</label>
+            <select class="form-select" id="offCbLockChip">
+              <option value="">-- Seleziona --</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Ratchet *</label>
+            <select class="form-select" id="offCbRatchet">
+              <option value="">-- Seleziona Ratchet --</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Bit *</label>
+            <select class="form-select" id="offCbBit">
+              <option value="">-- Seleziona Bit --</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Colore Neon</label>
+            <input type="color" class="form-input" id="offCbColor" value="#00d4ff" style="height:44px;padding:4px;cursor:pointer">
+          </div>
+
+          <button class="btn" onclick="offSaveCustomBey()">SALVA BEYBLADE</button>
+          <p class="error-txt" id="offCbError" style="display:none"></p>
         </div>
       </div>
     </div>
@@ -2892,11 +2999,11 @@ async function loadTournaments() {
 // Gestione Tabs
 function showTab(tabId) {
   const lobbyTabs = document.querySelectorAll('#mainLobbyView > .tabs > .tab');
-  lobbyTabs.forEach((t, i) => t.classList.toggle('active', ['players','tournaments','beys','profile','history'][i]===tabId));
-  
+  lobbyTabs.forEach((t, i) => t.classList.toggle('active', ['players','tournaments','beys','officina','profile','history'][i]===tabId));
+
   const lobbyContents = document.querySelectorAll('#mainLobbyView > .tab-content');
   lobbyContents.forEach(c => c.classList.remove('active'));
-  
+
   document.getElementById(tabId+'Tab').classList.add('active');
   if (tabId === 'tournaments') {
     loadTournaments();
@@ -2904,6 +3011,249 @@ function showTab(tabId) {
     loadProfileTab();
   } else if (tabId === 'history') {
     loadHistoryTab();
+  } else if (tabId === 'officina') {
+    loadOfficinaData();
+  }
+}
+
+// ─── OFFICINA ──────────────────────────────────────────────────────────────
+
+let dbParts = [];
+let ownedPartIds = new Set();
+let offOnlyMine = false;
+let offDataLoaded = false;
+
+const TYPE_ORDER_OFF = ['blade','ratchet','bit','assist_blade','lock_chip','over_blade'];
+const TYPE_LABELS_OFF = { blade:'Blade', ratchet:'Ratchet', bit:'Bit', assist_blade:'Assist Blade', lock_chip:'Lock Chip', over_blade:'Over Blade' };
+
+function offRatchetLabel(p) {
+  return (p.protrusions && p.height) ? p.protrusions+'-'+p.height : p.name;
+}
+
+async function loadOfficinaData() {
+  if (!currentUser) return;
+  try {
+    const [partsRes, ownedRes] = await Promise.all([
+      fetch('/api/parts'),
+      fetch('/api/bladers/'+currentUser.id+'/parts'),
+    ]);
+    if (partsRes.ok) dbParts = await partsRes.json();
+    if (ownedRes.ok) { const ids = await ownedRes.json(); ownedPartIds = new Set(ids); }
+    offDataLoaded = true;
+    renderMagazzino();
+    offPopulateSelects();
+    document.getElementById('offOwnedCount').textContent = ownedPartIds.size + ' pezzi';
+  } catch(e) {
+    document.getElementById('offPartsContainer').innerHTML = '<p style="text-align:center;color:var(--danger);font-size:0.85rem">Errore caricamento pezzi</p>';
+  }
+}
+
+function showOfficinaTab(tab) {
+  document.getElementById('offMagazzinoPanel').style.display = tab === 'magazzino' ? '' : 'none';
+  document.getElementById('offCreaPanel').style.display = tab === 'crea' ? '' : 'none';
+  document.getElementById('offTabMagazzino').classList.toggle('active', tab === 'magazzino');
+  document.getElementById('offTabCrea').classList.toggle('active', tab === 'crea');
+}
+
+function toggleOffOnlyMine() {
+  offOnlyMine = !offOnlyMine;
+  const btn = document.getElementById('offOnlyMineBtn');
+  btn.style.background = offOnlyMine ? 'var(--primary)' : 'transparent';
+  btn.style.color = offOnlyMine ? 'var(--bg-dark,#0a0a1a)' : 'var(--muted)';
+  btn.style.borderColor = offOnlyMine ? 'var(--primary)' : 'rgba(0,212,255,0.3)';
+  renderMagazzino();
+}
+
+function renderMagazzino() {
+  const container = document.getElementById('offPartsContainer');
+  if (!offDataLoaded) { container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted)">Caricamento...</div>'; return; }
+
+  const q = (document.getElementById('offSearch')?.value || '').toLowerCase();
+  const typeF = document.getElementById('offTypeFilter')?.value || 'all';
+
+  const filtered = dbParts.filter(p => {
+    if (typeF !== 'all' && p.part_type !== typeF) return false;
+    if (offOnlyMine && !ownedPartIds.has(p.id)) return false;
+    if (q) return p.name.toLowerCase().includes(q) || p.serial.toLowerCase().includes(q) || p.series.toLowerCase().includes(q);
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<p style="text-align:center;padding:24px;color:var(--muted);font-size:0.85rem">Nessun pezzo trovato</p>';
+    return;
+  }
+
+  // Group by type
+  const groups = {};
+  filtered.forEach(p => { if(!groups[p.part_type]) groups[p.part_type]=[]; groups[p.part_type].push(p); });
+
+  let html = '';
+  TYPE_ORDER_OFF.filter(t => groups[t]).forEach(type => {
+    html += '<div style="font-size:0.65rem;font-family:Orbitron;color:var(--primary);text-transform:uppercase;letter-spacing:1px;margin:12px 0 6px">'+TYPE_LABELS_OFF[type]+' ('+groups[type].length+')</div>';
+    groups[type].forEach(p => {
+      const owned = ownedPartIds.has(p.id);
+      const label = type === 'ratchet' ? offRatchetLabel(p) : p.name;
+      html += `<div onclick="toggleOfficinaPart('${p.id}')" style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:10px;border:1px solid ${owned?'rgba(0,255,136,0.4)':'rgba(255,255,255,0.05)'};background:${owned?'rgba(0,255,136,0.07)':'var(--surface-2)'};cursor:pointer;transition:all 0.15s">
+        <span style="font-size:1.1rem;flex-shrink:0">${owned?'✅':'⬜'}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-family:Orbitron;font-size:0.78rem;font-weight:700;color:${owned?'var(--success)':'var(--text)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</div>
+          <div style="font-size:0.68rem;color:var(--muted);display:flex;gap:8px;margin-top:2px">
+            ${p.serial?'<span style="color:var(--primary)">'+p.serial+'</span>':''}
+            ${p.series?'<span>'+p.series+'</span>':''}
+            ${p.brand?'<span>'+p.brand+'</span>':''}
+          </div>
+        </div>
+        ${p.color?'<div style="width:12px;height:12px;border-radius:50%;background:'+p.color+';border:1px solid rgba(255,255,255,0.2);flex-shrink:0"></div>':''}
+      </div>`;
+    });
+  });
+
+  container.innerHTML = html;
+}
+
+async function toggleOfficinaPart(partId) {
+  if (!currentUser) return;
+  const wasOwned = ownedPartIds.has(partId);
+  // Optimistic update
+  if (wasOwned) ownedPartIds.delete(partId); else ownedPartIds.add(partId);
+  renderMagazzino();
+  document.getElementById('offOwnedCount').textContent = ownedPartIds.size + ' pezzi';
+
+  try {
+    if (wasOwned) {
+      await fetch('/api/bladers/'+currentUser.id+'/parts/'+partId, { method:'DELETE' });
+    } else {
+      await fetch('/api/bladers/'+currentUser.id+'/parts', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ part_id: partId })
+      });
+    }
+  } catch(e) {
+    // Revert on error
+    if (wasOwned) ownedPartIds.add(partId); else ownedPartIds.delete(partId);
+    renderMagazzino();
+    showToast('Errore aggiornamento', 'error');
+  }
+}
+
+function offFilteredParts(type) {
+  const onlyMine = document.getElementById('offOnlyMineCheck')?.checked;
+  return dbParts.filter(p => p.part_type === type && (!onlyMine || ownedPartIds.has(p.id)));
+}
+
+function offPopulateSelects() {
+  const bladeOpts = offFilteredParts('blade').map(p => `<option value="${p.id}">${p.name}${p.serial?' ('+p.serial+')':''}${p.series?' — '+p.series:''}</option>`).join('');
+  document.getElementById('offCbBlade').innerHTML = '<option value="">-- Seleziona Blade --</option>' + bladeOpts;
+
+  const ratchetOpts = offFilteredParts('ratchet').map(p => `<option value="${p.id}">${offRatchetLabel(p)}${p.series?' — '+p.series:''}</option>`).join('');
+  document.getElementById('offCbRatchet').innerHTML = '<option value="">-- Seleziona Ratchet --</option>' + ratchetOpts;
+
+  const bitOpts = offFilteredParts('bit').map(p => `<option value="${p.id}">${p.name}${p.serial?' ('+p.serial+')':''}</option>`).join('');
+  document.getElementById('offCbBit').innerHTML = '<option value="">-- Seleziona Bit --</option>' + bitOpts;
+
+  offUpdateBlade();
+}
+
+function offUpdateBlade() {
+  const bladeId = document.getElementById('offCbBlade').value;
+  const blade = dbParts.find(p => p.id === bladeId);
+  const series = blade ? blade.series : '';
+  const isCX = series === 'CX';
+  const isCXNew = series === 'CX New';
+
+  document.getElementById('offAssistBladeGroup').style.display = isCX ? '' : 'none';
+  document.getElementById('offOverBladeGroup').style.display = isCXNew ? '' : 'none';
+  document.getElementById('offLockChipGroup').style.display = (isCX || isCXNew) ? '' : 'none';
+
+  const onlyMine = document.getElementById('offOnlyMineCheck')?.checked;
+  const filterOwned = p => !onlyMine || ownedPartIds.has(p.id);
+
+  if (isCX) {
+    const opts = dbParts.filter(p => p.part_type === 'assist_blade' && filterOwned(p))
+      .map(p => `<option value="${p.id}">${p.name}${p.serial?' ('+p.serial+')':''}</option>`).join('');
+    document.getElementById('offCbAssistBlade').innerHTML = '<option value="">-- Seleziona --</option>' + opts;
+  }
+  if (isCXNew) {
+    const opts = dbParts.filter(p => p.part_type === 'over_blade' && filterOwned(p))
+      .map(p => `<option value="${p.id}">${p.name}${p.serial?' ('+p.serial+')':''}</option>`).join('');
+    document.getElementById('offCbOverBlade').innerHTML = '<option value="">-- Seleziona --</option>' + opts;
+  }
+  if (isCX || isCXNew) {
+    const opts = dbParts.filter(p => p.part_type === 'lock_chip' && filterOwned(p))
+      .map(p => `<option value="${p.id}">${p.name}${p.serial?' ('+p.serial+')':''}</option>`).join('');
+    document.getElementById('offCbLockChip').innerHTML = '<option value="">-- Seleziona --</option>' + opts;
+  }
+}
+
+function offTypeFromBladeName(name) {
+  const n = (name||'').toLowerCase();
+  if (/sword|claw|fang|shark|dagger|slash/.test(n)) return 'attack';
+  if (/shield|knight|armor|iron|steel/.test(n)) return 'defense';
+  if (/wyvern|phoenix|halo|eternal|abyss/.test(n)) return 'stamina';
+  return 'balance';
+}
+
+async function offSaveCustomBey() {
+  const name = document.getElementById('offCbName').value.trim();
+  const bladeId = document.getElementById('offCbBlade').value;
+  const ratchetId = document.getElementById('offCbRatchet').value;
+  const bitId = document.getElementById('offCbBit').value;
+  const color = document.getElementById('offCbColor').value;
+  const errEl = document.getElementById('offCbError');
+
+  errEl.style.display = 'none';
+
+  if (!name) { errEl.textContent = 'Inserisci un nome'; errEl.style.display = 'block'; return; }
+  if (!bladeId || !ratchetId || !bitId) { errEl.textContent = 'Seleziona Blade, Ratchet e Bit'; errEl.style.display = 'block'; return; }
+
+  const blade = dbParts.find(p => p.id === bladeId);
+  const ratchet = dbParts.find(p => p.id === ratchetId);
+  const bit = dbParts.find(p => p.id === bitId);
+  const series = blade ? blade.series : '';
+  const isCX = series === 'CX';
+  const isCXNew = series === 'CX New';
+
+  const assistBladeId = isCX ? document.getElementById('offCbAssistBlade').value : null;
+  const overBladeId = isCXNew ? document.getElementById('offCbOverBlade').value : null;
+  const lockChipId = (isCX || isCXNew) ? document.getElementById('offCbLockChip').value : null;
+
+  const typeClass = offTypeFromBladeName(blade ? blade.name : '');
+  const statMap = { attack: { attack:85,defense:35,stamina:30,speed:80 }, defense: { attack:35,defense:85,stamina:70,speed:30 }, stamina: { attack:30,defense:55,stamina:85,speed:60 } };
+  const stats = statMap[typeClass] || { attack:50,defense:50,stamina:50,speed:50 };
+
+  try {
+    const payload = {
+      blader_id: currentUser.id,
+      name,
+      blade: blade.name,
+      ratchet: offRatchetLabel(ratchet),
+      bit: bit.name,
+      type_class: typeClass,
+      color,
+      stats: JSON.stringify({ weight:60, ...stats }),
+      blade_part_id: bladeId,
+      ratchet_part_id: ratchetId,
+      bit_part_id: bitId,
+    };
+    if (assistBladeId) payload.assist_blade_part_id = assistBladeId;
+    if (overBladeId) payload.over_blade_part_id = overBladeId;
+    if (lockChipId) payload.lock_chip_part_id = lockChipId;
+
+    const res = await fetch('/api/custom-beys', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    if (!res.ok) throw new Error('Errore salvataggio');
+
+    showToast('Beyblade creato!');
+    document.getElementById('offCbName').value = '';
+    document.getElementById('offCbBlade').value = '';
+    offUpdateBlade();
+    await loadCustomBeys();
+    renderCustomBeysList();
+    // Switch to beys tab to see the new bey
+    showTab('beys');
+  } catch(e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
   }
 }
 
