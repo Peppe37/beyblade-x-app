@@ -146,6 +146,7 @@ impl Database {
         let conn = Connection::open(&path)?;
         let db = Database { conn };
         db.migrate()?;
+        db.seed_parts_if_empty()?;
         Ok(db)
     }
 
@@ -1153,6 +1154,170 @@ impl Database {
 
     pub fn delete_part(&self, id: &str) -> Result<()> {
         self.conn.execute("DELETE FROM parts WHERE id=?1", rusqlite::params![id])?;
+        Ok(())
+    }
+
+    pub fn seed_parts_if_empty(&self) -> Result<()> {
+        let count: i32 = self.conn.query_row(
+            "SELECT COUNT(*) FROM parts",
+            [],
+            |row| row.get(0),
+        )?;
+
+        if count > 0 {
+            return Ok(());
+        }
+
+        println!("Seeding parts database from beyparts.json...");
+
+        let json_str = include_str!("beyparts.json");
+        let val: serde_json::Value = serde_json::from_str(json_str)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+
+        let slugify = |s: &str| -> String {
+            s.to_lowercase()
+                .chars()
+                .map(|c| if c.is_alphanumeric() { c } else { '-' })
+                .collect::<String>()
+                .split('-')
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<&str>>()
+                .join("-")
+        };
+
+        let extract_serial = |source_val: &serde_json::Value| -> String {
+            if let Some(arr) = source_val.as_array() {
+                for item in arr {
+                    if let Some(s) = item.as_str() {
+                        for word in s.split_whitespace() {
+                            if word.starts_with("BX-") || word.starts_with("UX-") || word.starts_with("CX-") || word.starts_with("BXG") {
+                                return word.to_string();
+                            }
+                        }
+                    }
+                }
+            }
+            "".to_string()
+        };
+
+        let get_hasbro_blade_name = |name: &str| -> Option<&'static str> {
+            match name {
+                "Dran Sword" => Some("Sword Dran"),
+                "Hells Scythe" => Some("Scythe Hells"),
+                "Wizard Arrow" => Some("Arrow Wizard"),
+                "Knight Shield" => Some("Helm Knight"),
+                "Knight Lance" => Some("Lance Knight"),
+                "Shark Edge" => Some("Keel Shark"),
+                "Leon Claw" => Some("Claw Leon"),
+                "Viper Tail" => Some("Tail Viper"),
+                "Dran Dagger" => Some("Dagger Dran"),
+                "Hells Chain" => Some("Chain Hells"),
+                "Phoenix Wing" => Some("Wing Phoenix"),
+                "Wyvern Gale" => Some("Gale Wyvern"),
+                "Unicorn Sting" => Some("Sting Unicorn"),
+                "Sphinx Cowl" => Some("Cowl Sphinx"),
+                "Dran Buster" => Some("Buster Dran"),
+                "Hells Hammer" => Some("Hammer Hells"),
+                "Wizard Rod" => Some("Rod Wizard"),
+                "Shinobi Shadow" => Some("Shadow Shinobi"),
+                "Leon Crest" => Some("Crest Leon"),
+                "Silver Wolf" => Some("Wolf Silver"),
+                "Samurai Beat" => Some("Steel Samurai"),
+                "Samurai Saber" => Some("Saber Samurai"),
+                "Cobalt Dragoon" => Some("Dragoon Cobalt"),
+                "Black Shell" => Some("Shell Black"),
+                "Whale Wave" => Some("Wave Whale"),
+                "Rhino Horn" => Some("Horn Rhino"),
+                "Hells Reaper" => Some("Reaper Hells"),
+                "Phoenix Feather" => Some("Feather Phoenix"),
+                "Phoenix Rudder" => Some("Rudder Phoenix"),
+                "Wyvern Hover" => Some("Hover Wyvern"),
+                "Aero Pegasus" => Some("Pegasus Aero"),
+                "Scorpio Spear" => Some("Spear Scorpio"),
+                "Tusk Mammoth" => Some("Mammoth Tusk"),
+                "Mummy Curse" => Some("Curse Mummy"),
+                "Weiss Tiger" => Some("Tiger Weiss"),
+                "Meteor Dragoon" => Some("Dragoon Meteor"),
+                "Golem Rock" => Some("Rock Golem"),
+                "Shark Gill" => Some("Gill Shark"),
+                "Goat Tackle" => Some("Tackle Goat"),
+                "Samurai Calibur" => Some("Calibur Samurai"),
+                "Shark Scale" => Some("Scale Shark"),
+                "Tyranno Roar" => Some("Roar Tyranno"),
+                "Knight Mail" => Some("Mail Knight"),
+                "Tricera Press" => Some("Press Tricera"),
+                "Xeno Xcalibur" => Some("Xcalibur Xeno"),
+                "Croc Crunch" => Some("Crunch Croc"),
+                "Ghost Circle" => Some("Circle Ghost"),
+                "Shinobi Knife" => Some("Knife Shinobi"),
+                "Ptera Swing" => Some("Swing Ptera"),
+                "Bear Scratch" => Some("Scratch Bear"),
+                _ => None
+            }
+        };
+
+        let insert_part = |part_type: &str, name: &str, serial: &str, pack: &str, brand: &str, series: &str, protrusions: Option<i32>, height: Option<i32>| -> Result<()> {
+            let id = format!("{}-{}-{}", brand, part_type, slugify(name));
+            let created_at = Utc::now().to_rfc3339();
+            let color: Option<&str> = None;
+            let image_url: Option<&str> = None;
+
+            self.conn.execute(
+                "INSERT OR IGNORE INTO parts (id, part_type, name, serial, pack, brand, series, color, image_url, protrusions, height, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                rusqlite::params![id, part_type, name, serial, pack, brand, series, color, image_url, protrusions, height, created_at],
+            )?;
+            Ok(())
+        };
+
+        let categories = [
+            ("blades", "blade"),
+            ("assist_blades", "assist_blade"),
+            ("ratchets", "ratchet"),
+            ("bits", "bit"),
+            ("lock_chips", "lock_chip"),
+            ("over_blades", "over_blade"),
+        ];
+
+        for &(array_key, part_type) in &categories {
+            if let Some(arr) = val.get(array_key).and_then(|v| v.as_array()) {
+                for item in arr {
+                    if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
+                        let series = item.get("line").and_then(|l| l.as_str()).unwrap_or("BX").to_lowercase();
+                        let series = match series.as_str() {
+                            "ux" => "ux",
+                            "cx" => "cx",
+                            "cx new" => "cx_new",
+                            _ => "bx"
+                        };
+
+                        let serial = extract_serial(item.get("source").unwrap_or(&serde_json::Value::Null));
+                        let pack = item.get("source").and_then(|s| s.as_array()).and_then(|a| a.first()).and_then(|f| f.as_str()).unwrap_or("");
+
+                        let mut protrusions = None;
+                        let mut height = None;
+                        if part_type == "ratchet" {
+                            let r_parts: Vec<&str> = name.split('-').collect();
+                            if r_parts.len() == 2 {
+                                protrusions = r_parts[0].parse::<i32>().ok();
+                                height = r_parts[1].parse::<i32>().ok();
+                            }
+                        }
+
+                        insert_part(part_type, name, &serial, pack, "takara_tomy", series, protrusions, height)?;
+
+                        if part_type == "blade" {
+                            if let Some(hb_name) = get_hasbro_blade_name(name) {
+                                insert_part(part_type, hb_name, &serial, pack, "hasbro", series, protrusions, height)?;
+                            }
+                        } else {
+                            insert_part(part_type, name, &serial, pack, "hasbro", series, protrusions, height)?;
+                        }
+                    }
+                }
+            }
+        }
+
+        println!("Successfully seeded parts database!");
         Ok(())
     }
 }
