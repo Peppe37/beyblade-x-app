@@ -28,7 +28,7 @@ RUN rm -rf src
 # Full build
 COPY src-tauri/icons ./icons/
 COPY src-tauri/src ./src/
-RUN touch src/main.rs && cargo build --release
+RUN find src -name "*.rs" -exec touch {} + && cargo build --release
 
 # ─── Stage 2: Runtime ────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
